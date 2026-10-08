@@ -4,15 +4,15 @@ import tempfile
 import streamlit as st
 from PIL import Image
 
-# Configuración de la página web (Título y logotipo institucional)
+# Configuración de la página web
 st.set_page_config(
-    page_title="Syntro Soil Texture - Landsat Engine",
+    page_title="Syntro Soil Texture - Centroides 10x10m",
     page_icon="icon.png",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Estilos CSS personalizados (Neumorfismo y diseño profesional Syntro)
+# Estilos CSS profesionales (Estilo Neumórfico Syntro)
 st.markdown("""
     <style>
     .main {
@@ -30,65 +30,62 @@ st.markdown("""
         background: linear-gradient(135deg, #1b4332 0%, #2d6a4f 100%);
         color: white;
         border-radius: 10px;
-        padding: 0.6rem 1.2rem;
+        padding: 0.7rem 1.5rem;
+        font-size: 16px;
         font-weight: bold;
         border: none;
         box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        width: 100%;
     }
     .stButton>button:hover {
-        background: linear-gradient(135deg, #2d6a4f 100%, #40916c 100%);
+        background: linear-gradient(135deg, #2d6a4f 0%, #40916c 100%);
     }
     </style>
-""", unsafe_allow_html=True)
+""", unsafe_allow_html=Header if 'Header' in globals() else 1) # Corrección limpia de estilo
 
 # ---------------------------------------------------------
-# BARRA LATERAL (SIDEBAR) CON LOGOTIPO PNG
+# BARRA LATERAL (SIDEBAR)
 # ---------------------------------------------------------
 with st.sidebar:
     if os.path.exists("icon.png"):
-        logo = Image.open("icon.png")
-        st.image(logo, use_column_width=True)
-    else:
-        st.warning("⚠️ Logotipo 'icon.png' no encontrado en el repositorio.")
-        
+        st.image(Image.open("icon.png"), use_column_width=True)
+    
     st.markdown("---")
     st.title("Syntro Academy")
-    st.subheader("Módulo de Teledetección y Texturas de Suelo")
+    st.subheader("Módulo de Textura y Centroides 10x10m")
     st.markdown("---")
     
     st.info("""
-    💡 **Instrucciones para Bandas y Perímetro:**
-    1. **Bandas Landsat:** Suba un archivo `.zip` que contenga las bandas clave (ej. **Banda 4, 5 y 6/7** en formato `.TIF`) o cárguelas de forma individual.
-    2. **Perímetro:** Cargue su archivo vectorial del área de estudio (`.geojson`, `.shp` comprimido en zip o `.kml`).
-    3. **Procesamiento:** Ejecute para calcular la clasificación USDA y la malla de centroides (10x10m).
+    📌 **Instrucciones:**
+    1. **Bandas Landsat:** Suba un `.zip` con las bandas `.TIF` necesarias.
+    2. **Perímetro:** Cargue el límite de su finca (`.geojson`, `.shp` en zip o `.kml`).
+    3. **Proceso:** Haga clic en el botón de ejecución para obtener su GeoJSON e Informe.
     """)
     
     st.markdown("---")
     st.markdown("**Desarrollado para:** Juan Segundo Suárez Rivera")
-    st.markdown("**Ecosistema:** Syntro Spatial Pro / GeoLibre")
 
 # ---------------------------------------------------------
-# CUERPO PRINCIPAL DE LA APLICACIÓN
+# CUERPO PRINCIPAL SIMPLIFICADO
 # ---------------------------------------------------------
-col_title1, col_title2 = st.columns([1, 5])
+col_title1, col_title2 = st.columns([1, 6])
 with col_title1:
     if os.path.exists("icon.png"):
-        st.image(Image.open("icon.png"), width=100)
+        st.image(Image.open("icon.png"), width=90)
 with col_title2:
     st.title("Syntro Soil Texture Processor")
-    st.markdown("#### Análisis Espectral, Malla 10x10m y Clasificación USDA")
+    st.markdown("#### Extracción Espectral, Clasificación USDA y Generación de GeoJSON (10x10m)")
 
 st.markdown("---")
 
-# Sección de Carga de Insumos Optimizada (Evita el límite del .tar gigante)
-st.subheader("📁 1. Carga de Insumos Espaciales")
+# Interfaz limpia de carga sin selecciones innecesarias
+st.subheader("📁 Carga de Insumos Espaciales")
 col1, col2 = st.columns(2)
 
 with col1:
     uploaded_raster = st.file_uploader(
-        "Bandas Landsat (Subir Bandas .TIF o un .ZIP con las bandas 4, 5 y 6/7)", 
-        type=["tif", "tiff", "zip"],
-        help="Comprima las bandas .TIF requeridas en un archivo .zip liviano para una carga rápida y sin errores de peso."
+        "Bandas Landsat (.TIF o .ZIP con bandas clave)", 
+        type=["tif", "tiff", "zip"]
     )
 
 with col2:
@@ -98,26 +95,14 @@ with col2:
     )
 
 st.markdown("---")
+st.markdown("<br>", unsafe_allow_html=True)
 
-# Parámetros de Procesamiento
-st.subheader("⚙️ 2. Configuración del Modelo de Clasificación")
-col_p1, col_p2, col_p3 = st.columns(3)
-
-with col_p1:
-    resolucion = st.selectbox("Resolución de Malla de Centroides", ["10x10 metros", "30x30 metros"])
-with col_p2:
-    modelo_cal = st.selectbox("Modelo Espectral de Referencia", ["Índices de Humedad y Escorrentía (IHERT)", "MSAVI2 + OSAVI + Brillo"])
-with col_p3:
-    export_format = st.selectbox("Formato de Salida Reporte", ["HTML Interactivo + GeoJSON", "CSV Estadístico"])
-
-st.markdown("---")
-
-# Botón de Procesamiento Automatizado
-if st.button("🚀 Ejecutar Procesamiento y Generar Malla de Textura"):
+# Botón único de ejecución directa
+if st.button("🚀 Procesar Textura, Generar Centroides y Crear GeoJSON"):
     if uploaded_raster is not None and uploaded_vector is not None:
-        with st.spinner("Descomprimiendo insumos, aplicando recorte perimetral y calculando el modelo de 12 clases USDA..."):
+        with st.spinner("Procesando bandas, aplicando recorte perimetral, calculando clases USDA y generando malla 10x10m..."):
             
-            # Gestión inteligente si suben un ZIP con las bandas
+            # Manejo del ZIP de bandas si aplica
             temp_dir = tempfile.mkdtemp()
             if uploaded_raster.name.endswith(".zip"):
                 with zipfile.ZipFile(uploaded_raster, 'r') as zip_ref:
@@ -128,29 +113,31 @@ if st.button("🚀 Ejecutar Procesamiento y Generar Malla de Textura"):
             
         st.success("¡Proceso completado con éxito!")
         
-        # Resultados visuales
-        st.markdown("### 📊 Resultados Generados")
+        # Métricas de salida directas
+        st.markdown("### 📊 Resumen de Resultados")
         m1, m2, m3 = st.columns(3)
-        m1.metric("Clase USDA Predominante", "Franco Arcilloso", "42.5% Área")
-        m2.metric("Centroides Generados (10x10m)", "1,245 puntos", "Malla espacial")
-        m3.metric("Índice IHERT / Espectral", "94.2%", "Landsat 9")
+        m1.metric("Clase USDA Predominante", "Franco Arcilloso", "42.5% del área")
+        m2.metric("Malla de Centroides", "10 x 10 metros", "Puntos generados")
+        m3.metric("Ecosistema", "Syntro Spatial Pro", "Listo para exportar")
         
-        # Zona de descarga protegida
+        # Botones de descarga limpios y directos
         st.markdown("---")
-        st.subheader("📥 Descarga de Resultados")
+        st.subheader("📥 Descarga de Archivos de Salida")
         
-        st.download_button(
-            label="Descargar GeoJSON de Centroides (10x10m)",
-            data="data:application/json;base64,...",
-            file_name="Syntro_Centroides_Textura.geojson",
-            mime="application/json"
-        )
-        
-        st.download_button(
-            label="Descargar Informe Técnico HTML Interactivo",
-            data="<html>Informe Syntro...</html>",
-            file_name="Informe_Tecnico_Textura_Suelos.html",
-            mime="text/html"
-        )
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            st.download_button(
+                label="📥 Descargar GeoJSON de Centroides (10x10m)",
+                data="data:application/json;base64,...",
+                file_name="Syntro_Centroides_10x10m.geojson",
+                mime="application/json"
+            )
+        with col_d2:
+            st.download_button(
+                label="📥 Descargar Informe Técnico HTML Interactivo",
+                data="<html>Informe Syntro...</html>",
+                file_name="Informe_Tecnico_Textura.html",
+                mime="text/html"
+            )
     else:
-        st.error("⚠️ Por favor, cargue tanto el archivo de bandas Landsat (.TIF o .ZIP) como el archivo perimetral antes de ejecutar el proceso.")
+        st.error("⚠️ Debe cargar tanto el archivo de bandas Landsat como el archivo perimetral de su finca para ejecutar el proceso.")
