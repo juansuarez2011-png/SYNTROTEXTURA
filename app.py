@@ -147,7 +147,6 @@ if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
                             with rarfile.RarFile(landsat_path) as rar_ref:
                                 rar_ref.extractall(tmpdirname)
                         except Exception:
-                            # Respaldo si no está instalada la librería de rar, intenta con patool o avisa
                             import subprocess
                             subprocess.run(["unrar", "x", landsat_path, tmpdirname], check=True)
                     else:
@@ -207,15 +206,18 @@ if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
                     area_total_m2 = polygon_utm.area
                     area_total_ha = area_total_m2 / 10000.0
                     
-                    # 3. Recorte ráster y aplicación de fórmula espectral real
+                    # 3. Recorte ráster seguro (evitando conflicto de tipos uint16 con -9999)
                     with rasterio.open(b4_path) as src:
-                        out_image, out_transform = mask(src, [polygon_utm], crop=True, nodata=-9999)
+                        out_image, out_transform = mask(src, [polygon_utm], crop=True, nodata=0)
                         b4 = out_image[0].astype(np.float32)
+                        b4[b4 == 0] = -9999
                         
                     def recortar_y_leer(path_banda):
                         with rasterio.open(path_banda) as src:
-                            img, _ = mask(src, [polygon_utm], crop=True, nodata=-9999)
-                            return img[0].astype(np.float32)
+                            img, _ = mask(src, [polygon_utm], crop=True, nodata=0)
+                            band_arr = img[0].astype(np.float32)
+                            band_arr[band_arr == 0] = -9999
+                            return band_arr
                             
                     b6 = recortar_y_leer(b6_path)
                     b7 = recortar_y_leer(b7_path)
