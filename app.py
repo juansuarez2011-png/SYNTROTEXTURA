@@ -5,11 +5,10 @@ import tarfile
 import numpy as np
 import geopandas as gpd
 from shapely.geometry import Point
+import rasterio
+from rasterio.mask import mask
 import streamlit as st
 from PIL import Image
-from osgeo import gdal
-
-gdal.UseExceptions()
 
 # Configuración de la página web
 st.set_page_config(
@@ -99,7 +98,7 @@ st.subheader("🛰️ 1. Parámetros de Entrada y Escena Satelital")
 st.markdown("""
     <div class="info-box">
         <strong>💡 Algoritmo Espectral Real Syntro:</strong><br>
-        El sistema procesa directamente las bandas espectrales de Landsat (B4, B6, B7) mediante el índice de arcilla/arena, recorta con el polígono en coordenadas UTM y calcula de forma totalmente dinámica las clases, hectáreas y porcentajes.
+        El sistema procesa directamente las bandas espectrales de Landsat (B4, B6, B7) mediante rasterio, recorta con el polígono en coordenadas UTM y calcula de forma totalmente dinámica las clases, hectáreas y porcentajes.
     </div>
 """, unsafe_allow_html=True)
 
@@ -174,43 +173,32 @@ if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
                     area_total_m2 = polygon_utm.area
                     area_total_ha = area_total_m2 / 10000.0
                     
-                    # Recorte raster usando gdal.Warp con el polígono
-                    shp_perim = os.path.join(tmpdirname, "perimetro.shp")
-                    gdf_utm.to_file(shp_perim)
-                    
-                    def recortar_banda(src_p):
-                        out_p = os.path.join(tmpdirname, f"clip_{os.path.basename(src_p)}")
-                        gdal.Warp(out_p, src_p, cutlineDSName=shp_perim, cropToCutline=True,
-                                  dstNodata=-9999, dstSRS=f"EPSG:{epsg_utm}", xRes=10.0, yRes=10.0,
-                                  warpOptions=['CUTLINE_ALL_TOUCHED=TRUE'], resampleAlg=gdal.GRA_CubicSpline)
-                        return out_p
+                    # Recorte raster con Rasterio Mask
+                    with rasterio.open(b4_path) as src:
+                        out_image, out_transform = mask(src, [polygon_utm], crop=True, nodata=-9999)
+                        b4 = out_image[0].astype(np.float32)
                         
-                    clip_b4 = recortar_banda(b4_path)
-                    clip_b6 = recortar_banda(b6_path)
-                    clip_b7 = recortar_banda(b7_path)
+                    def recortar_y_leer(path_banda):
+                        with rasterio.open(path_banda) as src:
+                            img, _ = mask(src, [polygon_utm], crop=True, nodata=-9999)
+                            return img[0].astype(np.float32)
+                            
+                    b6 = recortar_y_leer(b6_path)
+                    b7 = recortar_y_leer(b7_path)
                     
-                    def leer_banda(path):
-                        ds = gdal.Open(path, gdal.GA_ReadOnly)
-                        arr = ds.GetRasterBand(1).ReadAsArray().astype(np.float32)
-                        return arr, ds.GetGeoTransform(), ds.GetProjection()
-                        
-                    b4, gt, prj = leer_banda(clip_b4)
-                    b6, _, _ = leer_banda(clip_b6)
-                    b7, _, _ = leer_banda(clip_b7)
-                    
-                    # Aplicar fórmula espectral real de tu script
-                    mask = (b4 > 0) & (b4 != -9999) & (b6 > 0) & (b6 != -9999)
+                    # Aplicar fórmula espectral real
+                    mask_val = (b4 > 0) & (b4 != -9999) & (b6 > 0) & (b6 != -9999)
                     indice = np.zeros(b4.shape, dtype=np.float32)
-                    if np.any(mask):
-                        indice[mask] = (b6[mask] + b7[mask]) / (b4[mask] + 1.0)
-                        vals = indice[mask]
+                    if np.any(mask_val):
+                        indice[mask_val] = (b6[mask_val] + b7[mask_val]) / (b4[mask_val] + 1.0)
+                        vals = indice[mask_val]
                         q10, q35, q65, q90 = np.percentile(vals, [10, 35, 65, 90])
                         
                         tex_cat = np.zeros(b4.shape, dtype=np.uint8)
-                        tex_cat[mask] = np.where(indice[mask] <= q10, 1,
-                                        np.where(indice[mask] <= q35, 2,
-                                        np.where(indice[mask] <= q65, 3,
-                                        np.where(indice[mask] <= q90, 4, 5))))
+                        tex_cat[mask_val] = np.where(indice[mask_val] <= q10, 1,
+                                            np.where(indice[mask_val] <= q35, 2,
+                                            np.where(indice[mask_val] <= q65, 3,
+                                            np.where(indice[mask_val] <= q90, 4, 5))))
                     else:
                         tex_cat = np.ones(b4.shape, dtype=np.uint8) * 3
                         
@@ -231,8 +219,8 @@ if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
                         for c in range(cols):
                             if tex_cat[r, c] > 0:
                                 clase_id = int(tex_cat[r, c])
-                                x = gt[0] + (c + 0.5) * gt[1] + (r + 0.5) * gt[2]
-                                y = gt[3] + (c + 0.5) * gt[4] + (r + 0.5) * gt[5]
+                                # Coordenadas UTM a partir del transform de rasterio
+                                x, y = rasterio.transform.xy(out_transform, r, c, offset='center')
                                 pt = Point(x, y)
                                 
                                 if polygon_utm.contains(pt):
