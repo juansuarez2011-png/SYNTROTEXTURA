@@ -40,8 +40,17 @@ st.markdown("""
     .stButton>button:hover {
         background: linear-gradient(135deg, #2d6a4f 0%, #40916c 100%);
     }
+    .info-box {
+        background-color: #1b263b;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 5px solid #41ead4;
+        margin-bottom: 15px;
+        font-size: 14px;
+        color: #e0e1dd;
+    }
     </style>
-""", unsafe_allow_html=Header if 'Header' in globals() else 1) # Corrección limpia de estilo
+""", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # BARRA LATERAL (SIDEBAR)
@@ -56,17 +65,17 @@ with st.sidebar:
     st.markdown("---")
     
     st.info("""
-    📌 **Instrucciones:**
-    1. **Bandas Landsat:** Suba un `.zip` con las bandas `.TIF` necesarias.
-    2. **Perímetro:** Cargue el límite de su finca (`.geojson`, `.shp` en zip o `.kml`).
-    3. **Proceso:** Haga clic en el botón de ejecución para obtener su GeoJSON e Informe.
+    📌 **Instrucciones Rápidas:**
+    1. **Bandas Landsat:** Comprima en un `.zip` las bandas espectrales requeridas.
+    2. **Perímetro:** Cargue el límite de su área (`.geojson`, `.shp` en zip o `.kml`).
+    3. **Proceso:** Haga clic en el botón inferior para procesar y descargar su GeoJSON.
     """)
     
     st.markdown("---")
     st.markdown("**Desarrollado para:** Juan Segundo Suárez Rivera")
 
 # ---------------------------------------------------------
-# CUERPO PRINCIPAL SIMPLIFICADO
+# CUERPO PRINCIPAL
 # ---------------------------------------------------------
 col_title1, col_title2 = st.columns([1, 6])
 with col_title1:
@@ -78,14 +87,29 @@ with col_title2:
 
 st.markdown("---")
 
-# Interfaz limpia de carga sin selecciones innecesarias
+# Sección de Carga de Insumos con Guía Explícita para las Bandas
 st.subheader("📁 Carga de Insumos Espaciales")
+
+# Panel explicativo claro para que el usuario sepa qué bandas incluir
+st.markdown("""
+    <div class="info-box">
+        <strong>🛰️ ¿Qué bandas Landsat debe incluir en su archivo .ZIP?</strong><br>
+        Para el cálculo de texturas, índices de suelo y centroides, comprima en formato <code>.zip</code> únicamente las siguientes bandas en formato GeoTIFF (<code>.TIF</code>):
+        <ul>
+            <li><strong>Banda 4 (B4):</strong> Rojo (Red) — Esencial para índice de vegetación y suelo desnudo.</li>
+            <li><strong>Banda 5 (B5):</strong> Infrarrojo Cercano (NIR) — Delimitación de biomasa y humedad.</li>
+            <li><strong>Banda 6 o 7 (B6 / B7):</strong> Infrarrojo de Ondas Cortas (SWIR) — Discriminación de minerales y arcillas del suelo.</li>
+        </ul>
+    </div>
+""", unsafe_allow_html=True)
+
 col1, col2 = st.columns(2)
 
 with col1:
     uploaded_raster = st.file_uploader(
-        "Bandas Landsat (.TIF o .ZIP con bandas clave)", 
-        type=["tif", "tiff", "zip"]
+        "Archivo .ZIP con las Bandas Landsat (B4, B5, B6/B7 en .TIF)", 
+        type=["zip"],
+        help="Suba el archivo .zip que contiene las bandas clave mencionadas arriba."
     )
 
 with col2:
@@ -100,13 +124,11 @@ st.markdown("<br>", unsafe_allow_html=True)
 # Botón único de ejecución directa
 if st.button("🚀 Procesar Textura, Generar Centroides y Crear GeoJSON"):
     if uploaded_raster is not None and uploaded_vector is not None:
-        with st.spinner("Procesando bandas, aplicando recorte perimetral, calculando clases USDA y generando malla 10x10m..."):
+        with st.spinner("Descomprimiendo bandas, aplicando recorte perimetral, calculando clases USDA y generando malla 10x10m..."):
             
-            # Manejo del ZIP de bandas si aplica
             temp_dir = tempfile.mkdtemp()
-            if uploaded_raster.name.endswith(".zip"):
-                with zipfile.ZipFile(uploaded_raster, 'r') as zip_ref:
-                    zip_ref.extractall(temp_dir)
+            with zipfile.ZipFile(uploaded_raster, 'r') as zip_ref:
+                zip_ref.extractall(temp_dir)
             
             import time
             time.sleep(3)
@@ -140,4 +162,4 @@ if st.button("🚀 Procesar Textura, Generar Centroides y Crear GeoJSON"):
                 mime="text/html"
             )
     else:
-        st.error("⚠️ Debe cargar tanto el archivo de bandas Landsat como el archivo perimetral de su finca para ejecutar el proceso.")
+        st.error("⚠️ Debe cargar tanto el archivo ZIP con las bandas Landsat como el archivo perimetral de su finca para ejecutar el proceso.")
