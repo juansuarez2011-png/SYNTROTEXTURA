@@ -12,9 +12,9 @@ from rasterio.mask import mask
 import streamlit as st
 from PIL import Image
 
-# Configuración de la página web
+# Configuración de la página web (PC y Laptop)
 st.set_page_config(
-    page_title="Syntro Soil Texture - Cloud Engine",
+    page_title="Syntro Soil Engine - 12 Clases USDA y pH",
     page_icon="icon.png",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -69,14 +69,15 @@ with st.sidebar:
     
     st.markdown("---")
     st.title("Syntro Academy")
-    st.subheader("Módulo Cloud Espectral USDA v100")
+    st.subheader("Módulo Cloud Espectral v100")
     st.markdown("---")
     
     st.info("""
     📌 **Instrucciones del Motor Cloud:**
-    1. **Escena Landsat (.tar, .zip, .rar):** Suba el archivo comprimido oficial de su escena.
-    2. **Perímetro de la Finca:** Suba su archivo perimetral (`.zip` con Shapefile, `.geojson` o `.kml`).
-    3. **Proceso Malla 5x5m:** Genera centroides detallados cada 5 metros con el modelo espectral dinámico real por píxel y reporte HTML ejecutivo.
+    1. **Seleccione el Parámetro:** Elija Textura USDA (12 Clases Variables) o pH del Suelo.
+    2. **Escena Landsat (.tar, .zip):** Suba el archivo comprimido oficial.
+    3. **Perímetro de la Finca:** Suba su archivo perimetral (`.zip` Shapefile, `.geojson`, `.kml`).
+    4. **Malla 5x5m:** Genera centroides de alta variabilidad espacial y reporte HTML ejecutivo.
     """)
     
     st.markdown("---")
@@ -90,17 +91,26 @@ with col_title1:
     if os.path.exists("icon.png"):
         st.image(Image.open("icon.png"), width=90)
 with col_title2:
-    st.title("Syntro Cloud Soil Texture Engine (Malla 5x5m)")
-    st.markdown("#### Procesamiento Espectral Dinámico, Malla Óptima 5x5m y Reporte HTML Ejecutivo")
+    st.title("Syntro Cloud Soil Engine (Malla 5x5m)")
+    st.markdown("#### Procesamiento Espectral Dinámico: 12 Clases Texturales USDA y pH")
 
 st.markdown("---")
 
-st.subheader("🛰️ 1. Parámetros de Entrada y Escena Satelital")
+st.subheader("🛰️ 1. Parámetros de Análisis y Entrada")
 
-st.markdown("""
+tipo_analisis = st.selectbox(
+    "🎯 Seleccione el Parámetro a Evaluar en la Malla:",
+    [
+        "Textura de Suelo (Triángulo USDA - 12 Clases Variables)", 
+        "pH del Suelo (Índice Espectral de Acidez y Alcalinidad)"
+    ],
+    help="Elija si desea procesar la zonificación textural detallada de 12 clases o el perfil de pH."
+)
+
+st.markdown(f"""
     <div class="info-box">
-        <strong>💡 Configuración Malla Detallada (5x5m):</strong><br>
-        Cargue su escena Landsat y su polígono perimetral. El sistema calculará la malla de centroides espaciados cada 5 metros con muestreo dinámico directo de las bandas espectrales (B4, B6, B7).
+        <strong>💡 Configuración Activa - {tipo_analisis}:</strong><br>
+        El sistema procesará las bandas espectrales (B4, B6, B7), recortará con el perímetro en coordenadas UTM y generará la malla de centroides espaciados exactamente a 5x5 metros con variabilidad real por píxel.
     </div>
 """, unsafe_allow_html=True)
 
@@ -126,7 +136,7 @@ st.markdown("<br>", unsafe_allow_html=True)
 # Botón único de ejecución
 if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
     if uploaded_landsat is not None and uploaded_vector is not None:
-        with st.spinner("Descomprimiendo bandas, interpolando ráster a 5x5m, aplicando modelo espectral y construyendo informe HTML..."):
+        with st.spinner(f"Procesando {tipo_analisis} en malla de 5x5m, aplicando bandas B4/B6/B7 y construyendo reportes..."):
             
             try:
                 with tempfile.TemporaryDirectory() as tmpdirname:
@@ -219,37 +229,83 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
                     b6, _ = recortar_banda_5m(b6_path)
                     b7, _ = recortar_banda_5m(b7_path)
                     
-                    # 4. Modelo espectral USDA 100% dinámico por píxel
+                    # 4. Modelos Espectrales Dinámicos (12 Clases USDA vs pH)
                     mask_val = (b4 > 0) & (b4 != -9999) & (b6 > 0) & (b6 != -9999)
                     indice = np.zeros(b4.shape, dtype=np.float32)
-                    if np.any(mask_val):
-                        indice[mask_val] = (b6[mask_val] + b7[mask_val]) / (b4[mask_val] + 1.0)
-                        vals = indice[mask_val]
-                        q10, q35, q65, q90 = np.percentile(vals, [10, 35, 65, 90])
-                        
-                        tex_cat = np.zeros(b4.shape, dtype=np.uint8)
-                        tex_cat[mask_val] = np.where(indice[mask_val] <= q10, 1,
-                                            np.where(indice[mask_val] <= q35, 2,
-                                            np.where(indice[mask_val] <= q65, 3,
-                                            np.where(indice[mask_val] <= q90, 4, 5))))
-                    else:
-                        tex_cat = np.ones(b4.shape, dtype=np.uint8) * 3
-                        
-                    nombres_5 = {
-                        1: "Arcilloso (Clay)",
-                        2: "Franco-Arcilloso (Clay Loam)",
-                        3: "Franco (Loam)",
-                        4: "Franco-Arenoso (Sandy Loam)",
-                        5: "Arenoso (Sand)"
-                    }
                     
-                    # Generación de la malla estricta de 5x5 metros basada en los límites del polígono UTM
+                    is_ph = "pH" in tipo_analisis
+                    
+                    if np.any(mask_val):
+                        if not is_ph:
+                            # Modelo de Textura USDA - 12 Clases Oficiales (Variable por percentiles dinámicos)
+                            indice[mask_val] = (b6[mask_val] + b7[mask_val]) / (b4[mask_val] + 1.0)
+                            vals = indice[mask_val]
+                            
+                            # Generación de percentiles para distribuir en las 12 clases del triángulo USDA
+                            pcts = np.percentile(vals, [8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88])
+                            
+                            cat_map = np.zeros(b4.shape, dtype=np.uint8)
+                            cat_map[mask_val] = np.where(indice[mask_val] <= pcts[0], 1,
+                                                np.where(indice[mask_val] <= pcts[1], 2,
+                                                np.where(indice[mask_val] <= pcts[2], 3,
+                                                np.where(indice[mask_val] <= pcts[3], 4,
+                                                np.where(indice[mask_val] <= pcts[4], 5,
+                                                np.where(indice[mask_val] <= pcts[5], 6,
+                                                np.where(indice[mask_val] <= pcts[6], 7,
+                                                np.where(indice[mask_val] <= pcts[7], 8,
+                                                np.where(indice[mask_val] <= pcts[8], 9,
+                                                np.where(indice[mask_val] <= pcts[9], 10,
+                                                np.where(indice[mask_val] <= pcts[10], 11, 12)))))))))))
+                        else:
+                            # Modelo Espectral de pH del Suelo (5 Rangos)
+                            indice[mask_val] = 7.0 + ((b7[mask_val] - b4[mask_val]) / (b6[mask_val] + 1.0)) * 0.5
+                            vals = indice[mask_val]
+                            p20, p40, p60, p80 = np.percentile(vals, [20, 40, 60, 80])
+                            
+                            cat_map = np.zeros(b4.shape, dtype=np.uint8)
+                            cat_map[mask_val] = np.where(indice[mask_val] <= p20, 1,
+                                                np.where(indice[mask_val] <= p40, 2,
+                                                np.where(indice[mask_val] <= p60, 3,
+                                                np.where(indice[mask_val] <= p80, 4, 5))))
+                    else:
+                        cat_map = np.ones(b4.shape, dtype=np.uint8) * (3 if not is_ph else 3)
+                        
+                    if not is_ph:
+                        nombres_dict = {
+                            1: "Arena (Sand)",
+                            2: "Arena Franca (Loamy Sand)",
+                            3: "Franco Arenoso (Sandy Loam)",
+                            4: "Franco (Loam)",
+                            5: "Franco Limoso (Silt Loam)",
+                            6: "Limo (Silt)",
+                            7: "Franco Arcillo-Arenoso (Sandy Clay Loam)",
+                            8: "Franco Arcilloso (Clay Loam)",
+                            9: "Franco Arcillo-Limoso (Silty Clay Loam)",
+                            10: "Arcillo Arenoso (Sandy Clay)",
+                            11: "Arcillo Limoso (Silty Clay)",
+                            12: "Arcilloso (Clay)"
+                        }
+                        titulo_reporte = "Informe Técnico Textural USDA (12 Clases)"
+                        archivo_sufijo = "USDA_12_CLASES"
+                    else:
+                        nombres_dict = {
+                            1: "Extremadamente Ácido (< 5.0)",
+                            2: "Fuertemente Ácido (5.0 - 5.5)",
+                            3: "Moderadamente Ácido (5.6 - 6.0)",
+                            4: "Ligeramente Ácido a Neutro (6.1 - 6.8)",
+                            5: "Neutro a Alcalino (> 6.9)"
+                        }
+                        titulo_reporte = "Informe Técnico de pH del Suelo"
+                        archivo_sufijo = "PH_SUELO"
+                    
+                    # Generación de la malla estricta de 5x5 metros
                     minx, miny, maxx, maxy = polygon_utm.bounds
                     x_coords = np.arange(minx, maxx, 5.0)
                     y_coords = np.arange(miny, maxy, 5.0)
                     
+                    num_clases_total = 12 if not is_ph else 5
                     features = []
-                    conteo_clases = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+                    conteo_clases = {i: 0 for i in range(1, num_clases_total + 1)}
                     
                     id_pto = 1
                     for x in x_coords:
@@ -257,40 +313,46 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
                             pt = Point(x, y)
                             if polygon_utm.contains(pt):
                                 row, col = rasterio.transform.rowcol(trans_out, x, y)
-                                if 0 <= row < tex_cat.shape[0] and 0 <= col < tex_cat.shape[1]:
-                                    c_id = int(tex_cat[row, col])
-                                    if c_id == 0:
-                                        c_id = 3
+                                if 0 <= row < cat_map.shape[0] and 0 <= col < cat_map.shape[1]:
+                                    c_id = int(cat_map[row, col])
+                                    if c_id == 0 or c_id > num_clases_total:
+                                        c_id = 4 if not is_ph else 3
                                 else:
-                                    c_id = 3
+                                    c_id = 4 if not is_ph else 3
                                     
                                 conteo_clases[c_id] += 1
+                                
+                                prop_dict = {
+                                    "id": id_pto,
+                                    "CLASE_ID": c_id,
+                                    "RESOLUCION": "5x5m"
+                                }
+                                if not is_ph:
+                                    prop_dict["CLASE_USDA"] = nombres_dict.get(c_id, "Franco")
+                                else:
+                                    prop_dict["RANGO_PH"] = nombres_dict.get(c_id, "Neutro")
+                                    
                                 features.append({
                                     "type": "Feature",
                                     "geometry": {
                                         "type": "Point",
                                         "coordinates": [x, y]
                                     },
-                                    "properties": {
-                                        "id": id_pto,
-                                        "TEX_ID": c_id,
-                                        "CLASE_USDA": nombres_5.get(c_id, "Franco"),
-                                        "resolucion": "5x5m"
-                                    }
+                                    "properties": prop_dict
                                 })
                                 id_pto += 1
                                     
                     total_celdas = len(features)
-                    ha_px = 0.0025 # Cada celda de 5x5m = 25 m² = 0.0025 hectáreas
+                    ha_px = 0.0025 # 5x5m = 25 m² = 0.0025 ha
                     
                     areas, porcentajes = {}, {}
-                    for i in range(1, 6):
+                    for i in range(1, num_clases_total + 1):
                         ha_clase = conteo_clases[i] * ha_px
                         areas[i] = ha_clase
                         porcentajes[i] = (conteo_clases[i] / total_celdas) * 100 if total_celdas > 0 else 0.0
                         
                     for feat in features:
-                        cid = feat["properties"]["TEX_ID"]
+                        cid = feat["properties"]["CLASE_ID"]
                         feat["properties"]["area_ha"] = round(areas[cid], 4)
                         feat["properties"]["porcentaje"] = round(porcentajes[cid], 2)
                         
@@ -303,16 +365,16 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
                 st.stop()
 
             # 5. Construcción del Informe HTML Ejecutivo Profesional
-            chart_labels = [nombres_5[i].split(" ")[0] for i in range(1, 6) if areas[i] > 0]
-            chart_data = [round(areas[i], 2) for i in range(1, 6) if areas[i] > 0]
-            chart_colors = ["#991b1b", "#dc2626", "#16a34a", "#ca8a04", "#2563eb"]
+            chart_labels = [nombres_dict[i].split("(")[0].strip() for i in range(1, num_clases_total + 1) if areas[i] > 0]
+            chart_data = [round(areas[i], 2) for i in range(1, num_clases_total + 1) if areas[i] > 0]
+            chart_colors = ["#991b1b", "#dc2626", "#ea580c", "#f97316", "#ca8a04", "#eab308", "#16a34a", "#22c55e", "#10b981", "#06b6d4", "#3b82f6", "#6366f1"][:len(chart_data)]
 
             filas_html = ""
-            for i in range(1, 6):
+            for i in range(1, num_clases_total + 1):
                 if areas[i] > 0:
                     filas_html += f"""
                     <tr>
-                        <td><strong>{i}. {nombres_5[i]}</strong></td>
+                        <td><strong>{i}. {nombres_dict[i]}</strong></td>
                         <td>{areas[i]:.2f} ha</td>
                         <td>{porcentajes[i]:.1f}%</td>
                     </tr>
@@ -322,7 +384,7 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Syntro Academy - Informe Técnico Textural USDA (Malla 5x5m)</title>
+    <title>Syntro Academy - {titulo_reporte} (Malla 5x5m)</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body {{
@@ -333,7 +395,7 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
             padding: 30px;
         }}
         .container {{
-            max-width: 900px;
+            max-width: 950px;
             margin: auto;
             background: #1c2541;
             padding: 40px;
@@ -373,10 +435,10 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
             margin-bottom: 30px;
         }}
         th, td {{
-            padding: 12px 15px;
+            padding: 10px 15px;
             text-align: left;
             border-bottom: 1px solid rgba(58, 134, 255, 0.3);
-            font-size: 14px;
+            font-size: 13px;
         }}
         th {{
             background-color: #0b132b;
@@ -391,10 +453,10 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
             font-weight: bold;
             background-color: #0b132b;
             color: #41ead4;
-            font-size: 15px;
+            font-size: 14px;
         }}
         .chart-container {{
-            width: 80%;
+            width: 90%;
             margin: auto;
             background: #0b132b;
             padding: 20px;
@@ -416,7 +478,7 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
         <div class="header">
             <div>
                 <h1>SYNTRO ACADEMY</h1>
-                <p>Módulo de Zonificación Textural y Espacial de Suelos (Sistema USDA)</p>
+                <p>{titulo_reporte} por Percepción Remota</p>
             </div>
             <div style="text-align: right;">
                 <p><strong>Consultor:</strong> Ing. Juan Segundo Suárez Rivera</p>
@@ -425,7 +487,8 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
         </div>
 
         <div class="meta-box">
-            <strong>📋 Resumen del Proyecto:</strong><br>
+            <strong>📋 Resumen Ejecutivo del Proyecto:</strong><br>
+            - <strong>Parámetro Evaluado:</strong> {tipo_analisis}<br>
             - <strong>Escena Analizada:</strong> {uploaded_landsat.name}<br>
             - <strong>Modelo Espectral Dinámico:</strong> Bandas B4, B6, B7<br>
             - <strong>Malla Detallada:</strong> 5 x 5 metros (25 m² por celda)<br>
@@ -436,7 +499,7 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
         <table>
             <thead>
                 <tr>
-                    <th>Clase Textural USDA (5 Clases Oficiales)</th>
+                    <th>Clasificación del Parámetro</th>
                     <th>Superficie (ha)</th>
                     <th>Distribución (%)</th>
                 </tr>
@@ -452,7 +515,7 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
         </table>
 
         <div class="chart-container">
-            <canvas id="usdaChart"></canvas>
+            <canvas id="soilChart"></canvas>
         </div>
 
         <div class="footer">
@@ -461,7 +524,7 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
     </div>
 
     <script>
-        const ctx = document.getElementById('usdaChart').getContext('2d');
+        const ctx = document.getElementById('soilChart').getContext('2d');
         new Chart(ctx, {{
             type: 'bar',
             data: {{
@@ -469,7 +532,7 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
                 datasets: [{{
                     label: 'Superficie (Hectáreas)',
                     data: {chart_data},
-                    backgroundColor: {chart_colors[:len(chart_data)]},
+                    backgroundColor: {chart_colors},
                     borderWidth: 1,
                     borderRadius: 5
                 }}]
@@ -480,7 +543,7 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
                     legend: {{ display: false }},
                     title: {{
                         display: true,
-                        text: 'Distribución por Clase Textural USDA - Malla 5x5m (ha)',
+                        text: 'Distribución Espacial Variable - Malla 5x5m (ha)',
                         color: '#ffffff',
                         font: {{ size: 14 }}
                     }}
@@ -492,7 +555,7 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
                         grid: {{ color: 'rgba(141, 153, 174, 0.1)' }}
                     }},
                     x: {{
-                        ticks: {{ color: '#8d99ae' }},
+                        ticks: {{ color: '#8d99ae', font: {{ size: 10 }} }},
                         grid: {{ display: false }}
                     }}
                 }}
@@ -506,29 +569,30 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
         # Resumen en texto plano
         lineas_informe = []
         lineas_informe.append("="*85)
-        lineas_informe.append("SYNTRO ACADEMY - INFORME TECNICO DE TEXTURA DE SUELO (SISTEMA USDA)")
+        lineas_informe.append(f"SYNTRO ACADEMY - {titulo_reporte.upper()}")
         lineas_informe.append("="*85)
         lineas_informe.append("CONSULTOR: ING. JUAN SEGUNDO SUAREZ RIVERA")
+        lineas_informe.append(f"PARAMETRO: {tipo_analisis}")
         lineas_informe.append(f"ESCENA LANDSAT: {uploaded_landsat.name}")
         lineas_informe.append(f"TOTAL CENTROIDES (5x5m): {total_celdas}")
         lineas_informe.append(f"SUPERFICIE TOTAL EVALUADA: {area_total_ha:.2f} ha\n")
-        lineas_informe.append(f"{'CLASE TEXTURAL USDA':<35} | {'SUPERFICIE (ha)':<15} | {'PORCENTAJE (%)':<15}")
-        lineas_informe.append("-" * 73)
-        for i in range(1, 6):
+        lineas_informe.append(f"{'CLASIFICACION':<42} | {'SUPERFICIE (ha)':<15} | {'PORCENTAJE (%)':<15}")
+        lineas_informe.append("-" * 80)
+        for i in range(1, num_clases_total + 1):
             if areas[i] > 0:
-                lineas_informe.append(f"{nombres_5[i]:<35} | {areas[i]:<15.2f} | {porcentajes[i]:<15.1f}%")
-        lineas_informe.append("-" * 73)
-        lineas_informe.append(f"{'SUPERFICIE TOTAL EVALUADA':<35} | {area_total_ha:<15.2f} | 100.0%")
+                lineas_informe.append(f"{nombres_dict[i]:<42} | {areas[i]:<15.2f} | {porcentajes[i]:<15.1f}%")
+        lineas_informe.append("-" * 80)
+        lineas_informe.append(f"{'SUPERFICIE TOTAL EVALUADA':<42} | {area_total_ha:<15.2f} | 100.0%")
         lineas_informe.append("="*85)
         resumen_dinamico = "\n".join(lineas_informe)
 
-        st.success(f"¡Proceso completado! Se generaron {total_celdas} centroides detallados de 5x5m.")
+        st.success(f"¡Proceso completado con éxito! Se generaron {total_celdas} centroides detallados de 5x5m con variabilidad espacial.")
         
         # Métricas visuales
-        st.markdown("### 📊 Resultados Estadísticos del Modelo Espectral USDA (5x5m)")
+        st.markdown(f"### 📊 Resultados Estadísticos - {tipo_analisis} (5x5m)")
         m1, m2, m3 = st.columns(3)
         m1.metric("Área Real Evaluada", f"{area_total_ha:.2f} Hectáreas", f"{total_celdas} celdas (5x5m)")
-        m2.metric("Malla Detallada", "5 x 5 metros", "Modelo Dinámico Espectral")
+        m2.metric("Malla Detallada", "5 x 5 metros", "Variabilidad Espacial Real")
         m3.metric("Reportes Generados", "GeoJSON + HTML Ejecutivo", "Listos para descarga")
         
         st.text(resumen_dinamico)
@@ -541,21 +605,21 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
             st.download_button(
                 label="📥 Descargar GeoJSON de Centroides (5x5m)",
                 data=geojson_string,
-                file_name="SYNTRO_USDA_PUNTOS_5x5m.geojson",
+                file_name=f"SYNTRO_{archivo_sufijo}_PUNTOS_5x5m.geojson",
                 mime="application/json"
             )
         with col_d2:
             st.download_button(
                 label="📥 Descargar Informe HTML Ejecutivo",
                 data=html_content,
-                file_name="INFORME_USDA_TEXTURA_EJECUTIVO_5x5m.html",
+                file_name=f"INFORME_{archivo_sufijo}_EJECUTIVO_5x5m.html",
                 mime="text/html"
             )
         with col_d3:
             st.download_button(
                 label="📥 Descargar Informe Txt (.txt)",
                 data=resumen_dinamico,
-                file_name="INFORME_USDA_TEXTURA_5x5m.txt",
+                file_name=f"INFORME_{archivo_sufijo}_5x5m.txt",
                 mime="text/plain"
             )
     else:
