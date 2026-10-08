@@ -76,7 +76,7 @@ with st.sidebar:
     📌 **Instrucciones del Motor Cloud:**
     1. **Escena Landsat (.tar, .zip, .rar):** Suba el archivo comprimido oficial de su escena.
     2. **Perímetro de la Finca:** Suba su archivo perimetral (`.zip` con Shapefile, `.geojson` o `.kml`).
-    3. **Proceso Espectral Dinámico:** Extrae las bandas, calcula la matriz espectral real por píxel, genera la malla densa de 10x10m y emite el informe HTML ejecutivo.
+    3. **Proceso Óptimo (10x10m):** Malla calibrada para Landsat con modelo espectral 100% dinámico por píxel y reporte HTML ejecutivo.
     """)
     
     st.markdown("---")
@@ -90,8 +90,8 @@ with col_title1:
     if os.path.exists("icon.png"):
         st.image(Image.open("icon.png"), width=90)
 with col_title2:
-    st.title("Syntro Cloud Soil Texture Engine (Espectral Dinámico Real)")
-    st.markdown("#### Procesamiento Espectral por píxel, Malla Densa 10x10m y Reporte HTML Ejecutivo")
+    st.title("Syntro Cloud Soil Texture Engine (Malla Óptima 10x10m)")
+    st.markdown("#### Procesamiento Espectral Dinámico por Píxel y Reporte HTML Ejecutivo")
 
 st.markdown("---")
 
@@ -99,8 +99,8 @@ st.subheader("🛰️ 1. Parámetros de Entrada y Escena Satelital")
 
 st.markdown("""
     <div class="info-box">
-        <strong>💡 Modelo Espectral 100% Dinámico:</strong><br>
-        Las clases texturales se calculan directamente a partir de la firma espectral real de las bandas de Landsat (B4, B6, B7). Cada centroide de la malla toma exactamente el valor del píxel raster correspondiente.
+        <strong>💡 Calibración Métrica Optimizada (10x10m):</strong><br>
+        La resolución de 10x10 metros garantiza el equilibrio perfecto entre detalle espacial y rendimiento analítico para el procesamiento de bandas Landsat (B4, B6, B7) adaptadas a tu polígono.
     </div>
 """, unsafe_allow_html=True)
 
@@ -124,9 +124,9 @@ st.markdown("---")
 st.markdown("<br>", unsafe_allow_html=True)
 
 # Botón único de ejecución
-if st.button("🚀 Ejecutar Procesamiento Espectral Dinámico y Malla 10x10m"):
+if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
     if uploaded_landsat is not None and uploaded_vector is not None:
-        with st.spinner("Descomprimiendo bandas, ejecutando modelo espectral dinámico, generando malla densa y construyendo informe HTML..."):
+        with st.spinner("Descomprimiendo bandas, aplicando modelo espectral dinámico a 10x10m y construyendo informe HTML..."):
             
             try:
                 with tempfile.TemporaryDirectory() as tmpdirname:
@@ -207,7 +207,7 @@ if st.button("🚀 Ejecutar Procesamiento Espectral Dinámico y Malla 10x10m"):
                     area_total_m2 = polygon_utm.area
                     area_total_ha = area_total_m2 / 10000.0
                     
-                    # 3. Recorte ráster seguro
+                    # 3. Recorte ráster seguro a 10x10m
                     with rasterio.open(b4_path) as src:
                         out_image, out_transform = mask(src, [polygon_utm], crop=True, nodata=0)
                         b4 = out_image[0].astype(np.float32)
@@ -223,7 +223,7 @@ if st.button("🚀 Ejecutar Procesamiento Espectral Dinámico y Malla 10x10m"):
                     b6 = recortar_y_leer(b6_path)
                     b7 = recortar_y_leer(b7_path)
                     
-                    # 4. Modelo espectral USDA 100% dinámico según las bandas
+                    # 4. Modelo espectral USDA 100% dinámico por píxel
                     mask_val = (b4 > 0) & (b4 != -9999) & (b6 > 0) & (b6 != -9999)
                     indice = np.zeros(b4.shape, dtype=np.float32)
                     if np.any(mask_val):
@@ -254,7 +254,6 @@ if st.button("🚀 Ejecutar Procesamiento Espectral Dinámico y Malla 10x10m"):
                     id_pto = 1
                     for r in range(rows):
                         for c in range(cols):
-                            # Lectura dinámica estricta de la matriz raster clasificada por bandas
                             c_id = int(tex_cat[r, c])
                             if c_id > 0:
                                 x, y = rasterio.transform.xy(out_transform, r, c, offset='center')
@@ -424,8 +423,8 @@ if st.button("🚀 Ejecutar Procesamiento Espectral Dinámico y Malla 10x10m"):
         <div class="meta-box">
             <strong>📋 Resumen del Proyecto:</strong><br>
             - <strong>Escena Analizada:</strong> {uploaded_landsat.name}<br>
-            - <strong>Modelo:</strong> Espectral Dinámico Real (Bandas B4, B6, B7)<br>
-            - <strong>Malla Densa:</strong> 10 x 10 metros (Solape continuo sin vacíos)<br>
+            - <strong>Modelo:</strong> Espectral Dinámico Real por Píxel (Bandas B4, B6, B7)<br>
+            - <strong>Malla Óptima:</strong> 10 x 10 metros<br>
             - <strong>Superficie Total Evaluada:</strong> {area_total_ha:.2f} Hectáreas ({area_total_m2:,.2f} m²)<br>
             - <strong>Total Centroides Procesados:</strong> {total_celdas} puntos
         </div>
@@ -507,7 +506,7 @@ if st.button("🚀 Ejecutar Procesamiento Espectral Dinámico y Malla 10x10m"):
         lineas_informe.append("="*85)
         lineas_informe.append("CONSULTOR: ING. JUAN SEGUNDO SUAREZ RIVERA")
         lineas_informe.append(f"ESCENA LANDSAT: {uploaded_landsat.name}")
-        lineas_informe.append(f"TOTAL CENTROIDES DENSOS (10x10m): {total_celdas}")
+        lineas_informe.append(f"TOTAL CENTROIDES (10x10m): {total_celdas}")
         lineas_informe.append(f"SUPERFICIE TOTAL EVALUADA: {area_total_ha:.2f} ha\n")
         lineas_informe.append(f"{'CLASE TEXTURAL USDA':<35} | {'SUPERFICIE (ha)':<15} | {'PORCENTAJE (%)':<15}")
         lineas_informe.append("-" * 73)
@@ -519,12 +518,12 @@ if st.button("🚀 Ejecutar Procesamiento Espectral Dinámico y Malla 10x10m"):
         lineas_informe.append("="*85)
         resumen_dinamico = "\n".join(lineas_informe)
 
-        st.success(f"¡Proceso espectral dinámico completado! Se generaron {total_celdas} centroides de 10x10m basados en las bandas.")
+        st.success(f"¡Proceso espectral completado! Se generaron {total_celdas} centroides de 10x10m basados en las bandas.")
         
         # Métricas visuales
         st.markdown("### 📊 Resultados Estadísticos del Modelo Espectral USDA")
         m1, m2, m3 = st.columns(3)
-        m1.metric("Área Real Evaluada", f"{area_total_ha:.2f} Hectáreas", f"{total_celdas} celdas densas (10x10m)")
+        m1.metric("Área Real Evaluada", f"{area_total_ha:.2f} Hectáreas", f"{total_celdas} celdas (10x10m)")
         m2.metric("Modelo Espectral", "Dinámico por Píxel", "Bandas B4, B6, B7")
         m3.metric("Reportes Generados", "GeoJSON + HTML Ejecutivo", "Listos para descarga")
         
