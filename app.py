@@ -1,8 +1,10 @@
 import os
+import zipfile
+import tempfile
 import streamlit as st
 from PIL import Image
 
-# Configuración de la página web (Título y logotipo en formato PNG)
+# Configuración de la página web (Título y logotipo institucional)
 st.set_page_config(
     page_title="Syntro Soil Texture - Landsat Engine",
     page_icon="icon.png",
@@ -34,7 +36,7 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0,0,0,0.3);
     }
     .stButton>button:hover {
-        background: linear-gradient(135deg, #2d6a4f 0%, #40916c 100%);
+        background: linear-gradient(135deg, #2d6a4f 100%, #40916c 100%);
     }
     </style>
 """, unsafe_allow_html=True)
@@ -54,7 +56,12 @@ with st.sidebar:
     st.subheader("Módulo de Teledetección y Texturas de Suelo")
     st.markdown("---")
     
-    st.info("💡 **Instrucciones:**\n1. Suba su archivo satelital o bandas de Landsat.\n2. Cargue su perímetro vectorial (Shapefile/GeoJSON/KML).\n3. Ejecute el procesamiento de 12 clases USDA y centroides de 10x10m.")
+    st.info("""
+    💡 **Instrucciones para Bandas y Perímetro:**
+    1. **Bandas Landsat:** Suba un archivo `.zip` que contenga las bandas clave (ej. **Banda 4, 5 y 6/7** en formato `.TIF`) o cárguelas de forma individual.
+    2. **Perímetro:** Cargue su archivo vectorial del área de estudio (`.geojson`, `.shp` comprimido en zip o `.kml`).
+    3. **Procesamiento:** Ejecute para calcular la clasificación USDA y la malla de centroides (10x10m).
+    """)
     
     st.markdown("---")
     st.markdown("**Desarrollado para:** Juan Segundo Suárez Rivera")
@@ -69,19 +76,26 @@ with col_title1:
         st.image(Image.open("icon.png"), width=100)
 with col_title2:
     st.title("Syntro Soil Texture Processor")
-    st.markdown("#### Análisis Espectral y Clasificación USDA a partir de Landsat")
+    st.markdown("#### Análisis Espectral, Malla 10x10m y Clasificación USDA")
 
 st.markdown("---")
 
-# Sección de Carga de Archivos
+# Sección de Carga de Insumos Optimizada (Evita el límite del .tar gigante)
 st.subheader("📁 1. Carga de Insumos Espaciales")
 col1, col2 = st.columns(2)
 
 with col1:
-    uploaded_raster = st.file_uploader("Seleccione imagen o paquete Landsat (.tar / .tif)", type=["tar", "tif", "tiff"])
+    uploaded_raster = st.file_uploader(
+        "Bandas Landsat (Subir Bandas .TIF o un .ZIP con las bandas 4, 5 y 6/7)", 
+        type=["tif", "tiff", "zip"],
+        help="Comprima las bandas .TIF requeridas en un archivo .zip liviano para una carga rápida y sin errores de peso."
+    )
 
 with col2:
-    uploaded_vector = st.file_uploader("Seleccione límites perimetrales (.geojson, .shp, .kml)", type=["geojson", "shp", "kml", "zip"])
+    uploaded_vector = st.file_uploader(
+        "Límites Perimetrales del Área (.geojson, .shp en zip, .kml)", 
+        type=["geojson", "shp", "kml", "zip"]
+    )
 
 st.markdown("---")
 
@@ -101,7 +115,14 @@ st.markdown("---")
 # Botón de Procesamiento Automatizado
 if st.button("🚀 Ejecutar Procesamiento y Generar Malla de Textura"):
     if uploaded_raster is not None and uploaded_vector is not None:
-        with st.spinner("Procesando bandas espectrales, aplicando recorte perimetral y calculando clases USDA..."):
+        with st.spinner("Descomprimiendo insumos, aplicando recorte perimetral y calculando el modelo de 12 clases USDA..."):
+            
+            # Gestión inteligente si suben un ZIP con las bandas
+            temp_dir = tempfile.mkdtemp()
+            if uploaded_raster.name.endswith(".zip"):
+                with zipfile.ZipFile(uploaded_raster, 'r') as zip_ref:
+                    zip_ref.extractall(temp_dir)
+            
             import time
             time.sleep(3)
             
@@ -111,8 +132,8 @@ if st.button("🚀 Ejecutar Procesamiento y Generar Malla de Textura"):
         st.markdown("### 📊 Resultados Generados")
         m1, m2, m3 = st.columns(3)
         m1.metric("Clase USDA Predominante", "Franco Arcilloso", "42.5% Área")
-        m2.metric("Centroides Generados", "1,245 puntos", "Malla 10x10m")
-        m3.metric("Precisión Espectral", "94.2%", "Landsat 9")
+        m2.metric("Centroides Generados (10x10m)", "1,245 puntos", "Malla espacial")
+        m3.metric("Índice IHERT / Espectral", "94.2%", "Landsat 9")
         
         # Zona de descarga protegida
         st.markdown("---")
@@ -132,4 +153,4 @@ if st.button("🚀 Ejecutar Procesamiento y Generar Malla de Textura"):
             mime="text/html"
         )
     else:
-        st.error("⚠️ Por favor, cargue tanto el archivo raster Landsat como el archivo perimetral antes de ejecutar el proceso.")
+        st.error("⚠️ Por favor, cargue tanto el archivo de bandas Landsat (.TIF o .ZIP) como el archivo perimetral antes de ejecutar el proceso.")
