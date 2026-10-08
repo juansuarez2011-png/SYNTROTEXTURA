@@ -1,7 +1,7 @@
 streamlit
 numpy
-GDAL
 rasterio
 geopandas
 shapely
 matplotlib
+pillow
