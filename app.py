@@ -2,6 +2,7 @@ import os
 import json
 import tempfile
 import tarfile
+import zipfile
 import numpy as np
 import geopandas as gpd
 from shapely.geometry import Point
@@ -71,10 +72,10 @@ with st.sidebar:
     st.markdown("---")
     
     st.info("""
-    📌 **Instrucciones del Motor:**
-    1. **Archivo Landsat (.tar):** Suba el archivo comprimido oficial de la escena Landsat.
-    2. **Perímetro de la Finca:** Suba su archivo perimetral (`.geojson`, `.shp` en zip, `.kml`).
-    3. **Proceso Espectral:** Extrae las bandas B4, B6 y B7, calcula el índice espectral real, recorta el perimetral y genera los centroides de 10x10 metros con hectáreas y porcentajes exactos.
+    📌 **Instrucciones del Motor Cloud:**
+    1. **Escena Landsat (.tar, .zip, .rar):** Suba el archivo comprimido oficial de su escena.
+    2. **Perímetro de la Finca:** Suba su archivo perimetral (`.zip` con Shapefile, `.geojson` o `.kml`).
+    3. **Proceso Espectral:** El motor extrae las bandas B4, B6 y B7, genera la malla de centroides de 10x10 metros dentro del lote y calcula hectáreas y porcentajes exactos.
     """)
     
     st.markdown("---")
@@ -88,8 +89,8 @@ with col_title1:
     if os.path.exists("icon.png"):
         st.image(Image.open("icon.png"), width=90)
 with col_title2:
-    st.title("Syntro Cloud Soil Texture Engine (Espectral Real)")
-    st.markdown("#### Procesamiento de Bandas Landsat, Malla 10x10m y Estadísticas USDA")
+    st.title("Syntro Cloud Soil Texture Engine (Landsat Comprimido + Perímetro)")
+    st.markdown("#### Procesamiento Espectral Real, Malla 10x10m y Estadísticas USDA")
 
 st.markdown("---")
 
@@ -97,24 +98,24 @@ st.subheader("🛰️ 1. Parámetros de Entrada y Escena Satelital")
 
 st.markdown("""
     <div class="info-box">
-        <strong>💡 Algoritmo Espectral Real Syntro:</strong><br>
-        El sistema procesa directamente las bandas espectrales de Landsat (B4, B6, B7) mediante rasterio, recorta con el polígono en coordenadas UTM y calcula de forma totalmente dinámica las clases, hectáreas y porcentajes.
+        <strong>💡 Procesamiento Universal de Archivos Landsat:</strong><br>
+        Cargue su escena satelital en formato <code>.tar</code>, <code>.zip</code> o <code>.rar</code> y su polígono perimetral. El sistema leerá las bandas espectrales para calcular la malla vectorial de 10x10 metros adaptada estrictamente al interior de su lote.
     </div>
 """, unsafe_allow_html=True)
 
 col1, col2 = st.columns(2)
 
 with col1:
-    uploaded_tar = st.file_uploader(
-        "Archivo Landsat (.tar)", 
-        type=["tar"],
-        help="Suba el archivo tar oficial de la escena Landsat."
+    uploaded_landsat = st.file_uploader(
+        "Archivo de Escena Landsat (.tar, .zip, .rar)", 
+        type=["tar", "zip", "rar", "gz"],
+        help="Suba el archivo comprimido de la escena Landsat."
     )
 
 with col2:
     uploaded_vector = st.file_uploader(
-        "Límites Perimetrales del Área (.geojson, .shp en zip, .kml)", 
-        type=["geojson", "shp", "kml", "zip"],
+        "Límites Perimetrales del Área (.zip con Shapefile, .geojson, .kml)", 
+        type=["zip", "geojson", "kml", "shp"],
         help="Suba el archivo que delimita la finca a evaluar."
     )
 
@@ -123,39 +124,71 @@ st.markdown("<br>", unsafe_allow_html=True)
 
 # Botón único de ejecución
 if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
-    if uploaded_tar is not None and uploaded_vector is not None:
-        with st.spinner("Descomprimiendo bandas, recortando perimetral, aplicando fórmula espectral y calculando estadísticas..."):
+    if uploaded_landsat is not None and uploaded_vector is not None:
+        with st.spinner("Descomprimiendo bandas Landsat, recortando perimetral, aplicando fórmula espectral y calculando estadísticas..."):
             
             try:
                 with tempfile.TemporaryDirectory() as tmpdirname:
-                    # Guardar archivo tar
-                    tar_path = os.path.join(tmpdirname, uploaded_tar.name)
-                    with open(tar_path, "wb") as f:
-                        f.write(uploaded_tar.getbuffer())
+                    # 1. Procesar archivo Landsat comprimido (.tar, .zip, .rar, etc.)
+                    landsat_path = os.path.join(tmpdirname, uploaded_landsat.name)
+                    with open(landsat_path, "wb") as f:
+                        f.write(uploaded_landsat.getbuffer())
                         
-                    with tarfile.open(tar_path, 'r:*') as tar:
-                        tar.extractall(path=tmpdirname)
+                    nombre_archivo = uploaded_landsat.name.lower()
+                    if nombre_archivo.endswith('.zip'):
+                        with zipfile.ZipFile(landsat_path, 'r') as zip_ref:
+                            zip_ref.extractall(tmpdirname)
+                    elif nombre_archivo.endswith(('.tar', '.gz', '.tgz')):
+                        with tarfile.open(landsat_path, 'r:*') as tar_ref:
+                            tar_ref.extractall(path=tmpdirname)
+                    elif nombre_archivo.endswith('.rar'):
+                        try:
+                            import rarfile
+                            with rarfile.RarFile(landsat_path) as rar_ref:
+                                rar_ref.extractall(tmpdirname)
+                        except Exception:
+                            # Respaldo si no está instalada la librería de rar, intenta con patool o avisa
+                            import subprocess
+                            subprocess.run(["unrar", "x", landsat_path, tmpdirname], check=True)
+                    else:
+                        with tarfile.open(landsat_path, 'r:*') as tar_ref:
+                            tar_ref.extractall(path=tmpdirname)
                         
-                    # Buscar bandas B4, B6, B7
+                    # Buscar bandas B4, B6 y B7 dentro de la extracción
                     b4_path, b6_path, b7_path = None, None, None
-                    for r, d, f in os.walk(tmpdirname):
-                        for n in f:
-                            nu = n.upper()
-                            if '_B4.TIF' in nu and 'QA' not in nu: b4_path = os.path.join(r, n)
-                            if '_B6.TIF' in nu and 'QA' not in nu: b6_path = os.path.join(r, n)
-                            if '_B7.TIF' in nu and 'QA' not in nu: b7_path = os.path.join(r, n)
-                            
+                    for root, dirs, files in os.walk(tmpdirname):
+                        for file in files:
+                            nu = file.upper()
+                            if '_B4.TIF' in nu and 'QA' not in nu:
+                                b4_path = os.path.join(root, file)
+                            elif '_B6.TIF' in nu and 'QA' not in nu:
+                                b6_path = os.path.join(root, file)
+                            elif '_B7.TIF' in nu and 'QA' not in nu:
+                                b7_path = os.path.join(root, file)
+                                
                     if not all([b4_path, b6_path, b7_path]):
-                        st.error("No se encontraron las bandas necesarias (B4, B6, B7) en el archivo .tar.")
+                        st.error("No se encontraron las bandas B4, B6 y B7 dentro del archivo comprimido de Landsat. Verifique que contenga las imágenes TIF oficiales.")
                         st.stop()
-                        
-                    # Guardar vector perimetral
+
+                    # 2. Procesar archivo perimetral
                     vec_path = os.path.join(tmpdirname, uploaded_vector.name)
                     with open(vec_path, "wb") as f:
                         f.write(uploaded_vector.getbuffer())
                         
                     if uploaded_vector.name.endswith('.zip'):
-                        gdf = gpd.read_file(f"zip://{vec_path}")
+                        with zipfile.ZipFile(vec_path, 'r') as zip_ref:
+                            zip_ref.extractall(tmpdirname)
+                        shp_file = None
+                        for root, dirs, files in os.walk(tmpdirname):
+                            for file in files:
+                                if file.endswith('.shp'):
+                                    shp_file = os.path.join(root, file)
+                                    break
+                            if shp_file:
+                                break
+                        if not shp_file:
+                            raise ValueError("No se encontró ningún archivo .shp dentro del archivo .zip perimetral.")
+                        gdf = gpd.read_file(shp_file)
                     else:
                         gdf = gpd.read_file(vec_path)
                         
@@ -164,6 +197,7 @@ if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
                     else:
                         gdf = gdf.to_crs(epsg=4326)
                         
+                    # Zona UTM automática para precisión métrica exacta
                     centroid = gdf.unary_union.centroid
                     epsg_utm = 32619 if centroid.x > -72 else 32618
                     
@@ -173,7 +207,7 @@ if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
                     area_total_m2 = polygon_utm.area
                     area_total_ha = area_total_m2 / 10000.0
                     
-                    # Recorte raster con Rasterio Mask
+                    # 3. Recorte ráster y aplicación de fórmula espectral real
                     with rasterio.open(b4_path) as src:
                         out_image, out_transform = mask(src, [polygon_utm], crop=True, nodata=-9999)
                         b4 = out_image[0].astype(np.float32)
@@ -186,7 +220,7 @@ if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
                     b6 = recortar_y_leer(b6_path)
                     b7 = recortar_y_leer(b7_path)
                     
-                    # Aplicar fórmula espectral real
+                    # Modelo espectral USDA
                     mask_val = (b4 > 0) & (b4 != -9999) & (b6 > 0) & (b6 != -9999)
                     indice = np.zeros(b4.shape, dtype=np.float32)
                     if np.any(mask_val):
@@ -219,7 +253,6 @@ if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
                         for c in range(cols):
                             if tex_cat[r, c] > 0:
                                 clase_id = int(tex_cat[r, c])
-                                # Coordenadas UTM a partir del transform de rasterio
                                 x, y = rasterio.transform.xy(out_transform, r, c, offset='center')
                                 pt = Point(x, y)
                                 
@@ -259,16 +292,17 @@ if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
                     geojson_string = gdf_puntos_wgs84.to_json()
                     
             except Exception as e:
-                st.error(f"Error en el procesamiento espectral y geométrico: {e}")
+                st.error(f"Error procesando el archivo comprimido de Landsat o la geometría: {e}")
                 st.stop()
 
-            # Informe técnico
+            # Informe técnico consolidado
             lineas_informe = []
             lineas_informe.append("="*85)
             lineas_informe.append("SYNTRO ACADEMY - INFORME TECNICO DE TEXTURA DE SUELO (SISTEMA USDA)")
             lineas_informe.append("="*85)
             lineas_informe.append("CONSULTOR: ING. JUAN SEGUNDO SUAREZ RIVERA")
-            lineas_informe.append("OBJETIVO: Zonificacion textural espectral real (B4, B6, B7) y malla de centroides 10x10m\n")
+            lineas_informe.append(f"ESCENA LANDSAT: {uploaded_landsat.name}")
+            lineas_informe.append("OBJETIVO: Zonificacion textural espectral real y malla de centroides 10x10m\n")
             lineas_informe.append(f"{'CLASE TEXTURAL USDA':<35} | {'SUPERFICIE (ha)':<15} | {'PORCENTAJE (%)':<15}")
             lineas_informe.append("-" * 73)
             
@@ -281,16 +315,19 @@ if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
             
             resumen_dinamico = "\n".join(lineas_informe)
 
-        st.success(f"¡Proceso espectral completado! Se generaron {total_celdas} centroides basados en las bandas Landsat dentro de un área de {area_total_ha:.2f} ha.")
+        st.success(f"¡Proceso espectral completado! Se generaron {total_celdas} centroides de 10x10m a partir de las bandas en un área de {area_total_ha:.2f} ha.")
         
+        # Métricas visuales
         st.markdown("### 📊 Resultados Estadísticos del Modelo Espectral USDA")
         m1, m2, m3 = st.columns(3)
         m1.metric("Área Real Evaluada", f"{area_total_ha:.2f} Hectáreas", f"{total_celdas} celdas (10x10m)")
-        m2.metric("Resolución Espectral", "Landsat B4, B6, B7", "Índice Dinámico Real")
-        m3.metric("Salida GeoJSON", "Centroides", "Listos para GIS")
+        m2.metric("Resolución Espectral", "Bandas B4, B6, B7", "Extraídas de comprimido")
+        m3.metric("Salida GeoJSON", "Centroides", "Listos para GIS / GeoLibre")
         
+        # Mostrar el informe en pantalla
         st.text(resumen_dinamico)
         
+        # Botones de descarga directos
         st.markdown("---")
         st.subheader("📥 Descarga de Archivos de Salida")
         
@@ -310,4 +347,4 @@ if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
                 mime="text/plain"
             )
     else:
-        st.error("⚠️ Debe cargar tanto el archivo Landsat (.tar) como el archivo perimetral para ejecutar el modelo espectral.")
+        st.error("⚠️ Debe cargar tanto el archivo comprimido de Landsat (.tar, .zip, .rar) como el archivo perimetral antes de ejecutar.")
