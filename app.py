@@ -3,6 +3,7 @@ import json
 import tempfile
 import tarfile
 import zipfile
+import datetime
 import numpy as np
 import geopandas as gpd
 from shapely.geometry import Point
@@ -75,7 +76,7 @@ with st.sidebar:
     📌 **Instrucciones del Motor Cloud:**
     1. **Escena Landsat (.tar, .zip, .rar):** Suba el archivo comprimido oficial de su escena.
     2. **Perímetro de la Finca:** Suba su archivo perimetral (`.zip` con Shapefile, `.geojson` o `.kml`).
-    3. **Proceso Espectral:** El motor extrae las bandas B4, B6 y B7, genera la malla de centroides de 10x10 metros dentro del lote y calcula hectáreas y porcentajes exactos.
+    3. **Proceso Espectral Dinámico:** Extrae las bandas, calcula la matriz espectral real por píxel, genera la malla densa de 10x10m y emite el informe HTML ejecutivo.
     """)
     
     st.markdown("---")
@@ -89,8 +90,8 @@ with col_title1:
     if os.path.exists("icon.png"):
         st.image(Image.open("icon.png"), width=90)
 with col_title2:
-    st.title("Syntro Cloud Soil Texture Engine (Landsat Comprimido + Perímetro)")
-    st.markdown("#### Procesamiento Espectral Real, Malla 10x10m y Estadísticas USDA")
+    st.title("Syntro Cloud Soil Texture Engine (Espectral Dinámico Real)")
+    st.markdown("#### Procesamiento Espectral por píxel, Malla Densa 10x10m y Reporte HTML Ejecutivo")
 
 st.markdown("---")
 
@@ -98,8 +99,8 @@ st.subheader("🛰️ 1. Parámetros de Entrada y Escena Satelital")
 
 st.markdown("""
     <div class="info-box">
-        <strong>💡 Procesamiento Universal de Archivos Landsat:</strong><br>
-        Cargue su escena satelital en formato <code>.tar</code>, <code>.zip</code> o <code>.rar</code> y su polígono perimetral. El sistema leerá las bandas espectrales para calcular la malla vectorial de 10x10 metros adaptada estrictamente al interior de su lote.
+        <strong>💡 Modelo Espectral 100% Dinámico:</strong><br>
+        Las clases texturales se calculan directamente a partir de la firma espectral real de las bandas de Landsat (B4, B6, B7). Cada centroide de la malla toma exactamente el valor del píxel raster correspondiente.
     </div>
 """, unsafe_allow_html=True)
 
@@ -123,13 +124,13 @@ st.markdown("---")
 st.markdown("<br>", unsafe_allow_html=True)
 
 # Botón único de ejecución
-if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
+if st.button("🚀 Ejecutar Procesamiento Espectral Dinámico y Malla 10x10m"):
     if uploaded_landsat is not None and uploaded_vector is not None:
-        with st.spinner("Descomprimiendo bandas Landsat, recortando perimetral, aplicando fórmula espectral y calculando estadísticas..."):
+        with st.spinner("Descomprimiendo bandas, ejecutando modelo espectral dinámico, generando malla densa y construyendo informe HTML..."):
             
             try:
                 with tempfile.TemporaryDirectory() as tmpdirname:
-                    # 1. Procesar archivo Landsat comprimido (.tar, .zip, .rar, etc.)
+                    # 1. Procesar archivo Landsat comprimido
                     landsat_path = os.path.join(tmpdirname, uploaded_landsat.name)
                     with open(landsat_path, "wb") as f:
                         f.write(uploaded_landsat.getbuffer())
@@ -153,7 +154,7 @@ if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
                         with tarfile.open(landsat_path, 'r:*') as tar_ref:
                             tar_ref.extractall(path=tmpdirname)
                         
-                    # Buscar bandas B4, B6 y B7 dentro de la extracción
+                    # Buscar bandas B4, B6 y B7
                     b4_path, b6_path, b7_path = None, None, None
                     for root, dirs, files in os.walk(tmpdirname):
                         for file in files:
@@ -166,7 +167,7 @@ if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
                                 b7_path = os.path.join(root, file)
                                 
                     if not all([b4_path, b6_path, b7_path]):
-                        st.error("No se encontraron las bandas B4, B6 y B7 dentro del archivo comprimido de Landsat. Verifique que contenga las imágenes TIF oficiales.")
+                        st.error("No se encontraron las bandas B4, B6 y B7 dentro del archivo comprimido de Landsat.")
                         st.stop()
 
                     # 2. Procesar archivo perimetral
@@ -196,7 +197,7 @@ if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
                     else:
                         gdf = gdf.to_crs(epsg=4326)
                         
-                    # Zona UTM automática para precisión métrica exacta
+                    # Zona UTM automática
                     centroid = gdf.unary_union.centroid
                     epsg_utm = 32619 if centroid.x > -72 else 32618
                     
@@ -206,7 +207,7 @@ if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
                     area_total_m2 = polygon_utm.area
                     area_total_ha = area_total_m2 / 10000.0
                     
-                    # 3. Recorte ráster seguro (evitando conflicto de tipos uint16 con -9999)
+                    # 3. Recorte ráster seguro
                     with rasterio.open(b4_path) as src:
                         out_image, out_transform = mask(src, [polygon_utm], crop=True, nodata=0)
                         b4 = out_image[0].astype(np.float32)
@@ -222,7 +223,7 @@ if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
                     b6 = recortar_y_leer(b6_path)
                     b7 = recortar_y_leer(b7_path)
                     
-                    # Modelo espectral USDA
+                    # 4. Modelo espectral USDA 100% dinámico según las bandas
                     mask_val = (b4 > 0) & (b4 != -9999) & (b6 > 0) & (b6 != -9999)
                     indice = np.zeros(b4.shape, dtype=np.float32)
                     if np.any(mask_val):
@@ -253,13 +254,14 @@ if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
                     id_pto = 1
                     for r in range(rows):
                         for c in range(cols):
-                            if tex_cat[r, c] > 0:
-                                clase_id = int(tex_cat[r, c])
+                            # Lectura dinámica estricta de la matriz raster clasificada por bandas
+                            c_id = int(tex_cat[r, c])
+                            if c_id > 0:
                                 x, y = rasterio.transform.xy(out_transform, r, c, offset='center')
                                 pt = Point(x, y)
                                 
                                 if polygon_utm.contains(pt):
-                                    conteo_clases[clase_id] += 1
+                                    conteo_clases[c_id] += 1
                                     features.append({
                                         "type": "Feature",
                                         "geometry": {
@@ -268,8 +270,8 @@ if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
                                         },
                                         "properties": {
                                             "id": id_pto,
-                                            "TEX_ID": clase_id,
-                                            "CLASE_USDA": nombres_5.get(clase_id, "Franco"),
+                                            "TEX_ID": c_id,
+                                            "CLASE_USDA": nombres_5.get(c_id, "Franco"),
                                             "resolucion": "10x10m"
                                         }
                                     })
@@ -294,59 +296,264 @@ if st.button("🚀 Ejecutar Procesamiento Espectral y Malla 10x10m"):
                     geojson_string = gdf_puntos_wgs84.to_json()
                     
             except Exception as e:
-                st.error(f"Error procesando el archivo comprimido de Landsat o la geometría: {e}")
+                st.error(f"Error procesando el archivo comprimido o la geometría: {e}")
                 st.stop()
 
-            # Informe técnico consolidado
-            lineas_informe = []
-            lineas_informe.append("="*85)
-            lineas_informe.append("SYNTRO ACADEMY - INFORME TECNICO DE TEXTURA DE SUELO (SISTEMA USDA)")
-            lineas_informe.append("="*85)
-            lineas_informe.append("CONSULTOR: ING. JUAN SEGUNDO SUAREZ RIVERA")
-            lineas_informe.append(f"ESCENA LANDSAT: {uploaded_landsat.name}")
-            lineas_informe.append("OBJETIVO: Zonificacion textural espectral real y malla de centroides 10x10m\n")
-            lineas_informe.append(f"{'CLASE TEXTURAL USDA':<35} | {'SUPERFICIE (ha)':<15} | {'PORCENTAJE (%)':<15}")
-            lineas_informe.append("-" * 73)
-            
-            for i in range(1, 6):
-                lineas_informe.append(f"{nombres_5[i]:<35} | {areas[i]:<15.2f} | {porcentajes[i]:<15.1f}%")
-            
-            lineas_informe.append("-" * 73)
-            lineas_informe.append(f"{'SUPERFICIE TOTAL EVALUADA':<35} | {area_total_ha:<15.2f} | 100.0%")
-            lineas_informe.append("="*85)
-            
-            resumen_dinamico = "\n".join(lineas_informe)
+            # 5. Construcción del Informe HTML Ejecutivo Profesional
+            chart_labels = [nombres_5[i].split(" ")[0] for i in range(1, 6) if areas[i] > 0]
+            chart_data = [round(areas[i], 2) for i in range(1, 6) if areas[i] > 0]
+            chart_colors = ["#991b1b", "#dc2626", "#16a34a", "#ca8a04", "#2563eb"]
 
-        st.success(f"¡Proceso espectral completado! Se generaron {total_celdas} centroides de 10x10m a partir de las bandas en un área de {area_total_ha:.2f} ha.")
+            filas_html = ""
+            for i in range(1, 6):
+                if areas[i] > 0:
+                    filas_html += f"""
+                    <tr>
+                        <td><strong>{i}. {nombres_5[i]}</strong></td>
+                        <td>{areas[i]:.2f} ha</td>
+                        <td>{porcentajes[i]:.1f}%</td>
+                    </tr>
+                    """
+
+            html_content = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Syntro Academy - Informe Técnico Textural USDA</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #0b132b;
+            color: #ffffff;
+            margin: 0;
+            padding: 30px;
+        }}
+        .container {{
+            max-width: 900px;
+            margin: auto;
+            background: #1c2541;
+            padding: 40px;
+            border-radius: 14px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+            border: 1px solid #3a86ff;
+        }}
+        .header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #41ead4;
+            padding-bottom: 20px;
+            margin-bottom: 25px;
+        }}
+        .header h1 {{
+            color: #41ead4;
+            font-size: 24px;
+            margin: 0;
+        }}
+        .header p {{
+            color: #8d99ae;
+            font-size: 13px;
+            margin: 5px 0 0 0;
+        }}
+        .meta-box {{
+            background: #0b132b;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 25px;
+            font-size: 14px;
+            border-left: 5px solid #41ead4;
+        }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 30px;
+        }}
+        th, td {{
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid rgba(58, 134, 255, 0.3);
+            font-size: 14px;
+        }}
+        th {{
+            background-color: #0b132b;
+            color: #41ead4;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+        tr:hover {{
+            background-color: rgba(65, 234, 212, 0.05);
+        }}
+        .total-row {{
+            font-weight: bold;
+            background-color: #0b132b;
+            color: #41ead4;
+            font-size: 15px;
+        }}
+        .chart-container {{
+            width: 80%;
+            margin: auto;
+            background: #0b132b;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid rgba(58, 134, 255, 0.2);
+        }}
+        .footer {{
+            margin-top: 40px;
+            text-align: center;
+            font-size: 12px;
+            color: #8d99ae;
+            border-top: 1px solid rgba(141, 153, 174, 0.2);
+            padding-top: 15px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1>SYNTRO ACADEMY</h1>
+                <p>Módulo de Zonificación Textural y Espacial de Suelos (Sistema USDA)</p>
+            </div>
+            <div style="text-align: right;">
+                <p><strong>Consultor:</strong> Ing. Juan Segundo Suárez Rivera</p>
+                <p><strong>Fecha:</strong> {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+            </div>
+        </div>
+
+        <div class="meta-box">
+            <strong>📋 Resumen del Proyecto:</strong><br>
+            - <strong>Escena Analizada:</strong> {uploaded_landsat.name}<br>
+            - <strong>Modelo:</strong> Espectral Dinámico Real (Bandas B4, B6, B7)<br>
+            - <strong>Malla Densa:</strong> 10 x 10 metros (Solape continuo sin vacíos)<br>
+            - <strong>Superficie Total Evaluada:</strong> {area_total_ha:.2f} Hectáreas ({area_total_m2:,.2f} m²)<br>
+            - <strong>Total Centroides Procesados:</strong> {total_celdas} puntos
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Clase Textural USDA (5 Clases Oficiales)</th>
+                    <th>Superficie (ha)</th>
+                    <th>Distribución (%)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {filas_html}
+                <tr class="total-row">
+                    <td>SUPERFICIE TOTAL EVALUADA</td>
+                    <td>{area_total_ha:.2f} ha</td>
+                    <td>100.0%</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="chart-container">
+            <canvas id="usdaChart"></canvas>
+        </div>
+
+        <div class="footer">
+            Generado automáticamente por el motor geoespacial avanzado Syntro Cloud Engine &bull; QGIS / GeoLibre Compatible
+        </div>
+    </div>
+
+    <script>
+        const ctx = document.getElementById('usdaChart').getContext('2d');
+        new Chart(ctx, {{
+            type: 'bar',
+            data: {{
+                labels: {chart_labels},
+                datasets: [{{
+                    label: 'Superficie (Hectáreas)',
+                    data: {chart_data},
+                    backgroundColor: {chart_colors[:len(chart_data)]},
+                    borderWidth: 1,
+                    borderRadius: 5
+                }}]
+            }},
+            options: {{
+                responsive: true,
+                plugins: {{
+                    legend: {{ display: false }},
+                    title: {{
+                        display: true,
+                        text: 'Distribución de Superficie por Clase Textural USDA (ha)',
+                        color: '#ffffff',
+                        font: {{ size: 14 }}
+                    }}
+                }},
+                scales: {{
+                    y: {{
+                        beginAtZero: true,
+                        ticks: {{ color: '#8d99ae' }},
+                        grid: {{ color: 'rgba(141, 153, 174, 0.1)' }}
+                    }},
+                    x: {{
+                        ticks: {{ color: '#8d99ae' }},
+                        grid: {{ display: false }}
+                    }}
+                }}
+            }}
+        }});
+    </script>
+</body>
+</html>
+"""
+
+        # Resumen en texto plano
+        lineas_informe = []
+        lineas_informe.append("="*85)
+        lineas_informe.append("SYNTRO ACADEMY - INFORME TECNICO DE TEXTURA DE SUELO (SISTEMA USDA)")
+        lineas_informe.append("="*85)
+        lineas_informe.append("CONSULTOR: ING. JUAN SEGUNDO SUAREZ RIVERA")
+        lineas_informe.append(f"ESCENA LANDSAT: {uploaded_landsat.name}")
+        lineas_informe.append(f"TOTAL CENTROIDES DENSOS (10x10m): {total_celdas}")
+        lineas_informe.append(f"SUPERFICIE TOTAL EVALUADA: {area_total_ha:.2f} ha\n")
+        lineas_informe.append(f"{'CLASE TEXTURAL USDA':<35} | {'SUPERFICIE (ha)':<15} | {'PORCENTAJE (%)':<15}")
+        lineas_informe.append("-" * 73)
+        for i in range(1, 6):
+            if areas[i] > 0:
+                lineas_informe.append(f"{nombres_5[i]:<35} | {areas[i]:<15.2f} | {porcentajes[i]:<15.1f}%")
+        lineas_informe.append("-" * 73)
+        lineas_informe.append(f"{'SUPERFICIE TOTAL EVALUADA':<35} | {area_total_ha:<15.2f} | 100.0%")
+        lineas_informe.append("="*85)
+        resumen_dinamico = "\n".join(lineas_informe)
+
+        st.success(f"¡Proceso espectral dinámico completado! Se generaron {total_celdas} centroides de 10x10m basados en las bandas.")
         
         # Métricas visuales
         st.markdown("### 📊 Resultados Estadísticos del Modelo Espectral USDA")
         m1, m2, m3 = st.columns(3)
-        m1.metric("Área Real Evaluada", f"{area_total_ha:.2f} Hectáreas", f"{total_celdas} celdas (10x10m)")
-        m2.metric("Resolución Espectral", "Bandas B4, B6, B7", "Extraídas de comprimido")
-        m3.metric("Salida GeoJSON", "Centroides", "Listos para GIS / GeoLibre")
+        m1.metric("Área Real Evaluada", f"{area_total_ha:.2f} Hectáreas", f"{total_celdas} celdas densas (10x10m)")
+        m2.metric("Modelo Espectral", "Dinámico por Píxel", "Bandas B4, B6, B7")
+        m3.metric("Reportes Generados", "GeoJSON + HTML Ejecutivo", "Listos para descarga")
         
-        # Mostrar el informe en pantalla
         st.text(resumen_dinamico)
         
-        # Botones de descarga directos
         st.markdown("---")
         st.subheader("📥 Descarga de Archivos de Salida")
         
-        col_d1, col_d2 = st.columns(2)
+        col_d1, col_d2, col_d3 = st.columns(3)
         with col_d1:
             st.download_button(
-                label="📥 Descargar GeoJSON de Centroides (10x10m)",
+                label="📥 Descargar GeoJSON de Centroides",
                 data=geojson_string,
                 file_name="SYNTRO_USDA_PUNTOS_10x10m.geojson",
                 mime="application/json"
             )
         with col_d2:
             st.download_button(
-                label="📥 Descargar Informe Técnico (.txt)",
+                label="📥 Descargar Informe HTML Ejecutivo",
+                data=html_content,
+                file_name="INFORME_USDA_TEXTURA_EJECUTIVO.html",
+                mime="text/html"
+            )
+        with col_d3:
+            st.download_button(
+                label="📥 Descargar Informe Txt (.txt)",
                 data=resumen_dinamico,
                 file_name="INFORME_USDA_TEXTURA.txt",
                 mime="text/plain"
             )
     else:
-        st.error("⚠️ Debe cargar tanto el archivo comprimido de Landsat (.tar, .zip, .rar) como el archivo perimetral antes de ejecutar.")
+        st.error("⚠️ Debe cargar tanto el archivo comprimido de Landsat como el archivo perimetral antes de ejecutar.")
