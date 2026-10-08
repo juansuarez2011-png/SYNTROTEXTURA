@@ -2,10 +2,10 @@ import os
 import streamlit as st
 from PIL import Image
 
-# Configuración de la página web (Título y logotipo de pestaña)
+# Configuración de la página web (Título y logotipo en formato PNG)
 st.set_page_config(
     page_title="Syntro Soil Texture - Landsat Engine",
-    page_icon="icon.jpg",
+    page_icon="icon.png",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -40,14 +40,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# BARRA LATERAL (SIDEBAR) CON LOGOTIPO INSTITUCIONAL
+# BARRA LATERAL (SIDEBAR) CON LOGOTIPO PNG
 # ---------------------------------------------------------
 with st.sidebar:
-    if os.path.exists("icon.jpg"):
-        logo = Image.open("icon.jpg")
+    if os.path.exists("icon.png"):
+        logo = Image.open("icon.png")
         st.image(logo, use_column_width=True)
     else:
-        st.warning("⚠️ Logotipo 'icon.jpg' no encontrado en el directorio.")
+        st.warning("⚠️ Logotipo 'icon.png' no encontrado en el repositorio.")
         
     st.markdown("---")
     st.title("Syntro Academy")
@@ -65,8 +65,8 @@ with st.sidebar:
 # ---------------------------------------------------------
 col_title1, col_title2 = st.columns([1, 5])
 with col_title1:
-    if os.path.exists("icon.jpg"):
-        st.image(Image.open("icon.jpg"), width=100)
+    if os.path.exists("icon.png"):
+        st.image(Image.open("icon.png"), width=100)
 with col_title2:
     st.title("Syntro Soil Texture Processor")
     st.markdown("#### Análisis Espectral y Clasificación USDA a partir de Landsat")
@@ -102,7 +102,6 @@ st.markdown("---")
 if st.button("🚀 Ejecutar Procesamiento y Generar Malla de Textura"):
     if uploaded_raster is not None and uploaded_vector is not None:
         with st.spinner("Procesando bandas espectrales, aplicando recorte perimetral y calculando clases USDA..."):
-            # Simulación de proceso de alta precisión (Aquí se conecta con su lógica nativa de GDAL / Rasterio)
             import time
             time.sleep(3)
             
@@ -121,7 +120,7 @@ if st.button("🚀 Ejecutar Procesamiento y Generar Malla de Textura"):
         
         st.download_button(
             label="Descargar GeoJSON de Centroides (10x10m)",
-            data="data:application/json;base64,...", # Enlace a archivo real generado
+            data="data:application/json;base64,...",
             file_name="Syntro_Centroides_Textura.geojson",
             mime="application/json"
         )
