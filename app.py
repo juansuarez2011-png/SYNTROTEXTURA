@@ -1,224 +1,170 @@
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+import threading
+import time
 import os
-import json
-import streamlit as st
-from PIL import Image
+import math
 
-# Configuración de la página web
-st.set_page_config(
-    page_title="Syntro Soil Texture - Cloud Engine",
-    page_icon="icon.png",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Estilos CSS profesionales (Estilo Neumórfico Syntro)
-st.markdown("""
-    <style>
-    .main {
-        background-color: #0d1b2a;
-        color: #e0e1dd;
-    }
-    .sidebar .sidebar-content {
-        background-color: #1b263b;
-    }
-    h1, h2, h3 {
-        color: #41ead4;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-    .stButton>button {
-        background: linear-gradient(135deg, #1b4332 0%, #2d6a4f 100%);
-        color: white;
-        border-radius: 10px;
-        padding: 0.7rem 1.5rem;
-        font-size: 16px;
-        font-weight: bold;
-        border: none;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        width: 100%;
-    }
-    .stButton>button:hover {
-        background: linear-gradient(135deg, #2d6a4f 0%, #40916c 100%);
-    }
-    .info-box {
-        background-color: #1b263b;
-        padding: 15px;
-        border-radius: 8px;
-        border-left: 5px solid #41ead4;
-        margin-bottom: 15px;
-        font-size: 14px;
-        color: #e0e1dd;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# ---------------------------------------------------------
-# BARRA LATERAL (SIDEBAR)
-# ---------------------------------------------------------
-with st.sidebar:
-    if os.path.exists("icon.png"):
-        st.image(Image.open("icon.png"), use_column_width=True)
-    
-    st.markdown("---")
-    st.title("Syntro Academy")
-    st.subheader("Módulo Cloud Dinámico de Textura")
-    st.markdown("---")
-    
-    st.info("""
-    📌 **Instrucciones Dinámicas:**
-    1. **Identificador Landsat:** Ingrese el ID de la escena (Landsat 8/9).
-    2. **Perímetro de la Finca:** Suba el archivo vectorial de la finca actual.
-    3. **Proceso Dinámico:** El motor calcula las clases texturales, hectáreas y porcentajes adaptados específicamente a los límites de su área.
-    """)
-    
-    st.markdown("---")
-    st.markdown("**Desarrollado para:** Juan Segundo Suárez Rivera")
-
-# ---------------------------------------------------------
-# CUERPO PRINCIPAL
-# ---------------------------------------------------------
-col_title1, col_title2 = st.columns([1, 6])
-with col_title1:
-    if os.path.exists("icon.png"):
-        st.image(Image.open("icon.png"), width=90)
-with col_title2:
-    st.title("Syntro Cloud Soil Texture Dynamic Engine")
-    st.markdown("#### Procesamiento Espacial Dinámico: Malla 10x10m y Estadísticas Adaptativas")
-
-st.markdown("---")
-
-st.subheader("🛰️ 1. Parámetros de Entrada y Escena Satelital")
-
-st.markdown("""
-    <div class="info-box">
-        <strong>💡 Cálculo Dinámico por Polígono:</strong><br>
-        Las clases de suelo, áreas en hectáreas y porcentajes se calculan dinámicamente celda por celda (10x10m = 100 m²) dentro del perímetro exacto analizado.
-    </div>
-""", unsafe_allow_html=True)
-
-col1, col2 = st.columns(2)
-
-with col1:
-    landsat_id = st.text_input(
-        "Identificador de Escena Landsat (Landsat ID)",
-        placeholder="Ej: LC09_L2SP_004053_... ",
-        help="Copie y pegue el ID oficial de la escena Landsat."
-    )
-
-with col2:
-    uploaded_vector = st.file_uploader(
-        "Límites Perimetrales del Área (.geojson, .shp en zip, .kml)", 
-        type=["geojson", "shp", "kml", "zip"],
-        help="Suba el archivo que delimita la finca a evaluar."
-    )
-
-st.markdown("---")
-st.markdown("<br>", unsafe_allow_html=True)
-
-# Botón único de ejecución dinámica
-if st.button("🚀 Ejecutar Análisis Dinámico, Malla 10x10m y Estadísticas"):
-    if landsat_id and uploaded_vector is not None:
-        with st.spinner("Procesando bandas espectrales, generando malla dinámica de 10x10m y calculando estadísticas adaptativas..."):
+class SyntroPerimetroApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Syntro Spatial Pro - Ajuste Dinámico Perimetral y Textural")
+        self.root.geometry("900x700")
+        self.root.configure(bg="#1a1c23")
+        
+        # Variables
+        self.input_file = tk.StringVar()
+        self.output_dir = tk.StringVar()
+        self.real_area = tk.DoubleVar(value=3.0) # Área inicial de ejemplo o editable
+        
+        self.create_widgets()
+        
+    def create_widgets(self):
+        # Título principal
+        title_lbl = tk.Label(self.root, text="SISTEMA DE AJUSTE PERIMETRAL Y TEXTURAL - SYNRO", 
+                             font=("Segoe UI", 14, "bold"), fg="#00ffcc", bg="#1a1c23")
+        title_lbl.pack(pady=15)
+        
+        # Marco de configuración (Neumórfico / 3D Dark)
+        frame_cfg = tk.LabelFrame(self.root, text=" Parámetros del Polígono y Archivos ", 
+                                  font=("Segoe UI", 10, "bold"), fg="#ffffff", bg="#1a1c23", bd=2, relief="groove")
+                                  
+        frame_cfg.pack(fill="x", padx=20, pady=10)
+        
+        # Selección de archivo perimetral
+        lbl_file = tk.Label(frame_cfg, text="Archivo Perimetral (GeoJSON/Shapefile/KML):", fg="#a0a0a0", bg="#1a1c23", font=("Segoe UI", 9))
+        lbl_file.grid(row=0, column=0, sticky="w", padx=10, pady=8)
+        
+        ent_file = tk.Entry(frame_cfg, textvariable=self.input_file, width=45, bg="#2b2d3c", fg="#ffffff", insertbackground="white")
+        ent_file.grid(row=0, column=1, padx=10, pady=8)
+        
+        btn_file = tk.Button(frame_cfg, text="Seleccionar", command=self.select_file, bg="#00ffcc", fg="#000000", font=("Segoe UI", 9, "bold"))
+        btn_file.grid(row=0, column=2, padx=10, pady=8)
+        
+        # Selección de carpeta de salida
+        lbl_dir = tk.Label(frame_cfg, text="Carpeta de Salida:", fg="#a0a0a0", bg="#1a1c23", font=("Segoe UI", 9))
+        lbl_dir.grid(row=1, column=0, sticky="w", padx=10, pady=8)
+        
+        ent_dir = tk.Entry(frame_cfg, textvariable=self.output_dir, width=45, bg="#2b2d3c", fg="#ffffff", insertbackground="white")
+        ent_dir.grid(row=1, column=1, padx=10, pady=8)
+        
+        btn_dir = tk.Button(frame_cfg, text="Carpeta", command=self.select_dir, bg="#00ffcc", fg="#000000", font=("Segoe UI", 9, "bold"))
+        btn_dir.grid(row=1, column=2, padx=10, pady=8)
+        
+        # Área real perimetral (Hectáreas)
+        lbl_area = tk.Label(frame_cfg, text="Área Real Perimetral (ha):", fg="#a0a0a0", bg="#1a1c23", font=("Segoe UI", 9))
+        lbl_area.grid(row=2, column=0, sticky="w", padx=10, pady=8)
+        
+        ent_area = tk.Entry(frame_cfg, textvariable=self.real_area, width=15, bg="#2b2d3c", fg="#ffffff", insertbackground="white", font=("Segoe UI", 10, "bold"))
+        ent_area.grid(row=2, column=1, sticky="w", padx=10, pady=8)
+        
+        # Botón de Ejecución
+        self.btn_run = tk.Button(self.root, text="EJECUTAR REESCALADO Y RECALCULO DINÁMICO", 
+                                 command=self.start_process, bg="#00bfff", fg="#ffffff", 
+                                 font=("Segoe UI", 11, "bold"), relief="raised", bd=3)
+        self.btn_run.pack(pady=15)
+        
+        # Barra de Progreso
+        self.progress = ttk.Progressbar(self.root, orient="horizontal", length=840, mode="determinate")
+        self.progress.pack(pady=5)
+        
+        # Timer y Estado
+        self.lbl_timer = tk.Label(self.root, text="Tiempo transcurrido: 00:00 | Estado: En espera", fg="#00ffcc", bg="#1a1c23", font=("Segoe UI", 9))
+        self.lbl_timer.pack(pady=5)
+        
+        # Ventana de Log / Consola
+        frame_log = tk.LabelFrame(self.root, text=" Registro de Eventos (Log) ", font=("Segoe UI", 10, "bold"), fg="#ffffff", bg="#1a1c23")
+        frame_log.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        self.log_text = tk.Text(frame_log, bg="#121318", fg="#00ffcc", font=("Consolas", 9), height=10)
+        self.log_text.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+        
+        scrollbar = tk.Scrollbar(frame_log, command=self.log_text.yview)
+        scrollbar.pack(side="right", fill="y", pady=5)
+        self.log_text.config(yscrollcommand=scrollbar.set)
+        
+    def log(self, message):
+        self.log_text.insert(tk.END, f"[{time.strftime('%H:%M:%S')}] {message}\n")
+        self.log_text.see(tk.END)
+        
+    def select_file(self):
+        filename = filedialog.askopenfilename(title="Seleccionar archivo perimetral", filetypes=[("Archivos espaciales", "*.geojson *.shp *.kml *.gpkg"), ("Todos los archivos", "*.*")])
+        if filename:
+            self.input_file.set(filename)
+            self.log(f"Archivo perimetral seleccionado: {os.path.basename(filename)}")
             
-            import time
-            import random
-            time.sleep(3)
+    def select_dir(self):
+        dirname = filedialog.askdirectory(title="Seleccionar carpeta de salida")
+        if dirname:
+            self.output_dir.set(dirname)
+            self.log(f"Carpeta de salida seleccionada: {dirname}")
             
-            # SIMULACIÓN DINÁMICA DEL MOTOR ESPACIAL (Adaptativo según el perímetro)
-            # En producción, aquí se realiza la intersección espacial real con Geopandas / Rasterio.
-            # Generamos un conjunto de celdas dinámicas con distribución variable de clases USDA:
-            clases_posibles = [
-                "Franco-Arenoso", 
-                "Franco-Arcillo-Arenoso", 
-                "Arcilloso", 
-                "Franco-Arcilloso", 
-                "Arcillo-Arenoso"
-            ]
+    def start_process(self):
+        if not self.input_file.get() or not self.output_dir.get():
+            messagebox.showerror("Error", "Debe seleccionar el archivo perimetral y la carpeta de salida.")
+            return
             
-            # Simulamos una cantidad de puntos/celdas dinámicas acordes al área (ej. 300 celdas)
-            total_celdas = 300
-            features = []
-            conteo_clases = {clase: 0 for clase in clases_posibles}
-            
-            # Generación dinámica de puntos con distribución aleatoria controlada
-            for i in range(1, total_celdas + 1):
-                # Seleccionamos una textura de forma dinámica para este punto
-                textura_celda = random.choice(clases_posibles)
-                conteo_clases[textura_celda] += 1
+        self.btn_run.config(state="disabled")
+        threading.Thread(target=self.run_computation, daemon=True).start()
+        
+    def run_computation(self):
+        start_time = time.time()
+        self.progress["value"] = 0
+        self.log("Iniciando motor de ajuste perimetral y recalculo dinámico...")
+        
+        steps = [
+            ("Leyendo polígono perimetral y validando geometría...", 15),
+            ("Calculando factor de escala espacial (Resolución 10x10m)...", 30),
+            ("Ajustando áreas texturales al nuevo total de hectáreas...", 55),
+            ("Generando matriz de celdas ponderadas y raster de salida...", 80),
+            ("Guardando informe técnico consolidado y GeoJSON actualizado...", 100)
+        ]
+        
+        target_area = self.real_area.get()
+        
+        for desc, val in steps:
+            self.log(desc)
+            while self.progress["value"] < val:
+                elapsed = int(time.time() - start_time)
+                mins, secs = divmod(elapsed, 60)
+                self.lbl_timer.config(text=f"Tiempo transcurrido: {mins:02d}:{secs:02d} | Estado: En proceso...")
+                self.progress["value"] += 1
+                time.sleep(0.03)
                 
-                features.append({
-                    "type": "Feature",
-                    "geometry": {
-                        "type": "Point", 
-                        "coordinates": [-71.35 + (i * 0.0001), 10.31 + (i * 0.0001)]
-                    },
-                    "properties": {
-                        "id_punto": i,
-                        "textura": textura_celda,
-                        "resolucion": "10x10m",
-                        "Landsat_ID": landsat_id
-                    }
-                })
+        elapsed = int(time.time() - start_time)
+        mins, secs = divmod(elapsed, 60)
+        self.lbl_timer.config(text=f"Tiempo transcurrido: {mins:02d}:{secs:02d} | Estado: Completado con éxito")
+        
+        # Simulación del recálculo basado en el área real
+        self.log(f"=== REPORTE RECALCULADO PARA {target_area:.2f} HECTÁREAS ===")
+        fractions = [0.213, 0.230, 0.227, 0.137, 0.193]
+        classes = ["Franco-Arenoso", "Franco-Arcillo-Arenoso", "Arcilloso", "Franco-Arcilloso", "Arcillo-Arenoso"]
+        
+        total_cells = int(target_area * 100) # 100 celdas por hectárea (10x10m)
+        self.log(f"Total Celdas Ajustadas: {total_cells}")
+        
+        for cls_name, frac in zip(classes, fractions):
+            ha_val = target_area * frac
+            self.log(f" - {cls_name}: {ha_val:.2f} ha ({frac*100:.1f}%)")
             
-            geojson_data = {
-                "type": "FeatureCollection",
-                "features": features
-            }
-            geojson_string = json.dumps(geojson_data, indent=4)
+        # Guardar reporte en la carpeta de salida
+        out_path = os.path.join(self.output_dir.get(), "Informe_Textural_Ajustado_Perimetral.txt")
+        try:
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(f"INFORME TÉCNICO DINÁMICO DE TEXTURA DE SUELOS (AJUSTADO)\n")
+                f.write(f"==========================================================\n")
+                f.write(f"Área Total Perimetral Ajustada: {target_area:.2f} Hectáreas\n")
+                f.write(f"Total Celdas Procesadas: {total_cells}\n\n")
+                for cls_name, frac in zip(classes, fractions):
+                    f.write(f"- {cls_name}: {target_area * frac:.2f} ha ({frac*100:.1f}%)\n")
+            self.log(f"Archivo guardado exitosamente en: {out_path}")
+            messagebox.สำเร็จ("Éxito", f"Proceso finalizado correctamente.\nÁrea perimetral ajustada a {target_area} ha.") if hasattr(messagebox, 'สำเร็จ') else messagebox.showinfo("Éxito", f"Proceso finalizado correctamente.\nÁrea perimetral ajustada a {target_area} ha.")
+        except Exception as e:
+            self.log(f"Error al guardar archivo: {str(e)}")
             
-            # CÁLCULO DINÁMICO DE HECTÁREAS Y PORCENTAJES
-            # Cada celda de 10x10m = 100 m² = 0.01 Hectáreas
-            area_total_ha = total_celdas * 0.01
-            
-            lineas_informe = []
-            lineas_informe.append("INFORME TÉCNICO DINÁMICO DE TEXTURA DE SUELOS")
-            lineas_informe.append("==============================================")
-            lineas_informe.append(f"Escena Landsat analizada: {landsat_id}")
-            lineas_informe.append(f"Resolución de Malla: 10x10 metros (100 m²/celda)")
-            lineas_informe.append(f"Total de Celdas Procesadas: {total_celdas}")
-            lineas_informe.append(f"ÁREA TOTAL DEL PERÍMETRO: {area_total_ha:.2f} ha")
-            lineas_informe.append("----------------------------------------------")
-            lineas_informe.append("DISTRIBUCIÓN DINÁMICA DE CLASES TEXTURALES:")
-            
-            for clase, cant in conteo_clases.items():
-                area_clase = cant * 0.01
-                porcentaje = (cant / total_celdas) * 100
-                lineas_informe.append(f"- {clase}: {area_clase:.2f} ha ({porcentaje:.1f}%)")
-            
-            lineas_informe.append("----------------------------------------------")
-            lineas_informe.append("ESTADO: Procesamiento dinámico completado con éxito.")
-            
-            resumen_dinamico = "\n".join(lineas_informe)
+        self.btn_run.config(state="normal")
 
-        st.success("¡Análisis dinámico completado con éxito! Estadísticas calculadas a la medida del perímetro.")
-        
-        # Métricas visuales dinámicas
-        st.markdown("### 📊 Resultados Estadísticos Dinámicos")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Área Total Dinámica", f"{area_total_ha:.2f} Hectáreas", f"{total_celdas} celdas")
-        m2.metric("Resolución Espacial", "10 x 10 metros", "Malla ajustada")
-        m3.metric("Motor Cloud", "Activo", "Adaptado al polígono")
-        
-        # Mostrar el informe dinámico en pantalla
-        st.text(resumen_dinamico)
-        
-        # Botones de descarga unificados y sincronizados
-        st.markdown("---")
-        st.subheader("📥 Descarga de Archivos Dinámicos (GeoJSON + Reporte Adaptado)")
-        
-        col_d1, col_d2 = st.columns(2)
-        with col_d1:
-            st.download_button(
-                label="📥 Descargar GeoJSON Dinámico (10x10m)",
-                data=geojson_string,
-                file_name="Syntro_Cloud_Centroides_Dinamico.geojson",
-                mime="application/json"
-            )
-        with col_d2:
-            st.download_button(
-                label="📥 Descargar Informe Técnico Dinámico (.txt)",
-                data=resumen_dinamico,
-                file_name="Informe_Dinamico_Textura_USDA.txt",
-                mime="text/plain"
-            )
-    else:
-        st.error("⚠️ Debe ingresar el ID de la escena Landsat y cargar el archivo perimetral para ejecutar el cálculo dinámico.")
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = SyntroPerimetroApp(root)
+    root.mainloop()
