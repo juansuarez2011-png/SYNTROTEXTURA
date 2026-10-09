@@ -110,7 +110,7 @@ tipo_analisis = st.selectbox(
 st.markdown(f"""
     <div class="info-box">
         <strong>💡 Configuración Activa - {tipo_analisis}:</strong><br>
-        El sistema procesará las bandas espectrales (B4, B6, B7), recortará con el perímetro en coordenadas UTM y generará la malla de centroides espaciados exactamente a 5x5 metros con variabilidad real por píxel.
+        El sistema procesará las bandas espectrales (B4, B6, B7), alineará dinámicamente el sistema de coordenadas del perímetro con el ráster y generará la malla de centroides espaciados a 5x5 metros.
     </div>
 """, unsafe_allow_html=True)
 
@@ -136,7 +136,7 @@ st.markdown("<br>", unsafe_allow_html=True)
 # Botón único de ejecución
 if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
     if uploaded_landsat is not None and uploaded_vector is not None:
-        with st.spinner(f"Procesando {tipo_analisis} en malla de 5x5m, aplicando bandas B4/B6/B7 y construyendo reportes..."):
+        with st.spinner(f"Procesando {tipo_analisis} en malla de 5x5m, alineando coordenadas y construyendo reportes..."):
             
             try:
                 with tempfile.TemporaryDirectory() as tmpdirname:
@@ -180,7 +180,7 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
                         st.error("No se encontraron las bandas B4, B6 y B7 dentro del archivo comprimido de Landsat.")
                         st.stop()
 
-                    # 2. Procesar archivo perimetral
+                    # 2. Procesar archivo perimetral y asegurar solape CRS exacto con el ráster
                     vec_path = os.path.join(tmpdirname, uploaded_vector.name)
                     with open(vec_path, "wb") as f:
                         f.write(uploaded_vector.getbuffer())
@@ -204,23 +204,30 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
                         
                     if gdf.crs is None:
                         gdf.set_crs(epsg=4326, inplace=True)
-                    else:
-                        gdf = gdf.to_crs(epsg=4326)
                         
-                    # Zona UTM automática
-                    centroid = gdf.unary_union.centroid
+                    # Obtener el CRS exacto de la banda Landsat para evitar el error de solape
+                    with rasterio.open(b4_path) as src_check:
+                        raster_crs = src_check.crs
+                        
+                    gdf = gdf.to_crs(raster_crs)
+                        
+                    # Zona UTM automática métrica para la malla de 5x5m
+                    gdf_wgs84 = gdf.to_crs(epsg=4326)
+                    centroid = gdf_wgs84.unary_union.centroid
                     epsg_utm = 32619 if centroid.x > -72 else 32618
                     
-                    gdf_utm = gdf.to_crs(epsg=epsg_utm)
+                    gdf_utm = gdf_wgs84.to_crs(epsg=epsg_utm)
                     polygon_utm = gdf_utm.unary_union
                     
                     area_total_m2 = polygon_utm.area
                     area_total_ha = area_total_m2 / 10000.0
                     
-                    # 3. Recorte ráster seguro
+                    # 3. Recorte ráster seguro adaptado al CRS del ráster
                     def recortar_banda_5m(path_b):
                         with rasterio.open(path_b) as src_b:
-                            img_b, trans_b = mask(src_b, [polygon_utm], crop=True, nodata=0, all_touched=True)
+                            # Recortar usando la geometría en el CRS nativo del ráster
+                            geom_nativo = [gdf.unary_union]
+                            img_b, trans_b = mask(src_b, geom_nativo, crop=True, nodata=0, all_touched=True)
                             arr = img_b[0].astype(np.float32)
                             arr[arr == 0] = -9999
                             return arr, trans_b
@@ -237,11 +244,8 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
                     
                     if np.any(mask_val):
                         if not is_ph:
-                            # Modelo de Textura USDA - 12 Clases Oficiales (Variable por percentiles dinámicos)
                             indice[mask_val] = (b6[mask_val] + b7[mask_val]) / (b4[mask_val] + 1.0)
                             vals = indice[mask_val]
-                            
-                            # Generación de percentiles para distribuir en las 12 clases del triángulo USDA
                             pcts = np.percentile(vals, [8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88])
                             
                             cat_map = np.zeros(b4.shape, dtype=np.uint8)
@@ -257,7 +261,6 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
                                                 np.where(indice[mask_val] <= pcts[9], 10,
                                                 np.where(indice[mask_val] <= pcts[10], 11, 12)))))))))))
                         else:
-                            # Modelo Espectral de pH del Suelo (5 Rangos)
                             indice[mask_val] = 7.0 + ((b7[mask_val] - b4[mask_val]) / (b6[mask_val] + 1.0)) * 0.5
                             vals = indice[mask_val]
                             p20, p40, p60, p80 = np.percentile(vals, [20, 40, 60, 80])
@@ -268,7 +271,7 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
                                                 np.where(indice[mask_val] <= p60, 3,
                                                 np.where(indice[mask_val] <= p80, 4, 5))))
                     else:
-                        cat_map = np.ones(b4.shape, dtype=np.uint8) * (3 if not is_ph else 3)
+                        cat_map = np.ones(b4.shape, dtype=np.uint8) * 3
                         
                     if not is_ph:
                         nombres_dict = {
@@ -298,7 +301,7 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
                         titulo_reporte = "Informe Técnico de pH del Suelo"
                         archivo_sufijo = "PH_SUELO"
                     
-                    # Generación de la malla estricta de 5x5 metros
+                    # Generación de la malla estricta de 5x5 metros en UTM
                     minx, miny, maxx, maxy = polygon_utm.bounds
                     x_coords = np.arange(minx, maxx, 5.0)
                     y_coords = np.arange(miny, maxy, 5.0)
@@ -307,12 +310,20 @@ if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
                     features = []
                     conteo_clases = {i: 0 for i in range(1, num_clases_total + 1)}
                     
+                    # Transformador de coordenadas para mapear los puntos UTM al espacio ráster nativo
+                    from rasterio.warp import transform_geom
+                    import shapely.geometry
+                    
                     id_pto = 1
                     for x in x_coords:
                         for y in y_coords:
-                            pt = Point(x, y)
-                            if polygon_utm.contains(pt):
-                                row, col = rasterio.transform.rowcol(trans_out, x, y)
+                            pt_utm = Point(x, y)
+                            if polygon_utm.contains(pt_utm):
+                                # Convertir punto UTM de regreso a WGS84 y luego a CRS nativo del ráster para consultar el píxel
+                                pt_wgs = gpd.GeoSeries([pt_utm], crs=f"EPSG:{epsg_utm}").to_crs(epsg=4326).iloc[0]
+                                pt_nativo = gpd.GeoSeries([pt_wgs], crs="EPSG:4326").to_crs(raster_crs).iloc[0]
+                                
+                                row, col = rasterio.transform.rowcol(trans_out, pt_nativo.x, pt_nativo.y)
                                 if 0 <= row < cat_map.shape[0] and 0 <= col < cat_map.shape[1]:
                                     c_id = int(cat_map[row, col])
                                     if c_id == 0 or c_id > num_clases_total:
