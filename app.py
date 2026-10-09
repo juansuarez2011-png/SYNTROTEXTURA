@@ -22,7 +22,8 @@ class InterpolacionIDWApp:
         style = ttk.Style()
         style.theme_use('clam')
         style.configure("TLabel", background="#2b2b2b", foreground="#ffffff", font=("Segoe UI", 10))
-        style.configure("TButton", font=("Segoe UI", 10, "bold", background="#4CAF50"), foreground="white", borderwidth=3, relief="raised")
+        # Corregido el error de sintaxis de los estilos aquí:
+        style.configure("TButton", font=("Segoe UI", 10, "bold"), background="#4CAF50", foreground="white", borderwidth=3, relief="raised")
         style.map("TButton", background=[("active", "#45a049")])
         style.configure("Horizontal.TProgressbar", background="#4CAF50", troughcolor="#1e1e1e", bordercolor="#2b2b2b", lightcolor="#4CAF50", darkcolor="#4CAF50")
         
@@ -145,7 +146,6 @@ class InterpolacionIDWApp:
             gdf_puntos = gpd.read_file(self.archivo_puntos.get())
             gdf_poli = gpd.read_file(self.archivo_poligono.get())
             
-            # SOLUCIÓN CRÍTICA: Forzar la misma proyección (CRS) para evitar el error de solapamiento
             if gdf_puntos.crs is None:
                 self.logger.warning("El archivo de puntos no tiene CRS definido. Asignando WGS84 por defecto.")
                 gdf_puntos.set_crs("EPSG:4326", inplace=True)
