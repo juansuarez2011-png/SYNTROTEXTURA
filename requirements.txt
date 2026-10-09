@@ -1,7 +1,6 @@
 streamlit
-numpy
-rasterio
 geopandas
+scipy
+rasterio
+numpy
 shapely
-matplotlib
-pillow
