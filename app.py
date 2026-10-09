@@ -9,20 +9,32 @@ import rasterio
 from rasterio.transform import from_origin
 from rasterio.mask import mask
 import datetime
+from PIL import Image
 
 # Configuración de página
 st.set_page_config(page_title="Syntro Academy - Interpolación IDW", page_icon="🌍", layout="wide")
 
-# --- BARRA LATERAL DE MARCA SYNTRÓ ---
+# --- BARRA LATERAL DE MARCA SYNTRO ---
 with st.sidebar:
-    st.markdown("""
-        <div style="text-align: center; padding: 10px;">
-            <h1 style='color: #4CAF50; margin-bottom: 0;'>SYNTRÓ</h1>
-            <p style='color: #aaaaaa; font-size: 14px;'>Academy & Spatial Intelligence</p>
-            <hr style='border-color: #4CAF50;'>
-        </div>
-    """, unsafe_allow_html=True)
-    
+    # Intento de cargar el logo oficial de Syntro desde el repositorio
+    logo_path = None
+    for posible_logo in ["icon.png", "LOGO.png", "logo1-1.png"]:
+        if os.path.exists(posible_logo):
+            logo_path = posible_logo
+            break
+            
+    if logo_path:
+        img_logo = Image.open(logo_path)
+        st.image(img_logo, use_column_width=True)
+    else:
+        st.markdown("""
+            <div style="text-align: center; padding: 10px;">
+                <h1 style='color: #4CAF50; margin-bottom: 0;'>SYNTRO</h1>
+                <p style='color: #aaaaaa; font-size: 14px;'>Academy & Spatial Intelligence</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+    st.markdown("<hr style='border-color: #4CAF50;'>", unsafe_allow_html=True)
     st.markdown("### 👤 Sesión Activa")
     st.info("Usuario: **Juan Suárez**\n\nMódulo: **Interpolación IDW & Reportes Bio-espaciales**")
     
@@ -150,10 +162,10 @@ if uploaded_puntos is not None:
                         fecha_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         
                         informe_texto = f"""==================================================
-              SYNTRÓ ACADEMY - INFORME TÉCNICO ESPACIAL
+        SYNTRO ACADEMY - INFORME TÉCNICO ESPACIAL
 ==================================================
 Fecha de Generación: {fecha_str}
-Especialista: Juan Suárez
+Especialista: Ing. Juan Segundo Suárez Rivera
 Variable Analizada: {campo_seleccionado}
 --------------------------------------------------
 PARÁMETROS DE MODELADO:
@@ -168,7 +180,7 @@ ESTADÍSTICAS DESCRIPTIVAS DEL LOTE:
 - Valor Promedio (Media): {mean_val:.4f}
 - Desviación Estándar: {std_val:.4f}
 ==================================================
-Syntro Spatial Pro - Todos los derechos reservados.
+Syntro Spatial Intelligence - Todos los derechos reservados.
 """
                         informe_path = os.path.join(tempfile.gettempdir(), f"Informe_Syntro_{campo_seleccionado}.txt")
                         with open(informe_path, "w", encoding="utf-8") as f:
