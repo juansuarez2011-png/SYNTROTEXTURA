@@ -1,626 +1,274 @@
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+import logging
+import time
+import threading
 import os
-import json
-import tempfile
-import tarfile
-import zipfile
-import datetime
 import numpy as np
 import geopandas as gpd
-from shapely.geometry import Point
+from scipy.spatial import cKDTree
+from scipy.ndimage import gaussian_filter
 import rasterio
+from rasterio.transform import from_origin
 from rasterio.mask import mask
-import streamlit as st
-from PIL import Image
 
-# Configuración de la página web (PC y Laptop)
-st.set_page_config(
-    page_title="Syntro Soil Engine - 12 Clases USDA y pH",
-    page_icon="icon.png",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Estilos CSS profesionales (Estilo Neumórfico Syntro)
-st.markdown("""
-    <style>
-    .main {
-        background-color: #0d1b2a;
-        color: #e0e1dd;
-    }
-    .sidebar .sidebar-content {
-        background-color: #1b263b;
-    }
-    h1, h2, h3 {
-        color: #41ead4;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-    .stButton>button {
-        background: linear-gradient(135deg, #1b4332 0%, #2d6a4f 100%);
-        color: white;
-        border-radius: 10px;
-        padding: 0.7rem 1.5rem;
-        font-size: 16px;
-        font-weight: bold;
-        border: none;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        width: 100%;
-    }
-    .stButton>button:hover {
-        background: linear-gradient(135deg, #2d6a4f 100%, #40916c 100%);
-    }
-    .info-box {
-        background-color: #1b263b;
-        padding: 15px;
-        border-radius: 8px;
-        border-left: 5px solid #41ead4;
-        margin-bottom: 15px;
-        font-size: 14px;
-        color: #e0e1dd;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# ---------------------------------------------------------
-# BARRA LATERAL (SIDEBAR)
-# ---------------------------------------------------------
-with st.sidebar:
-    if os.path.exists("icon.png"):
-        st.image(Image.open("icon.png"), use_column_width=True)
-    
-    st.markdown("---")
-    st.title("Syntro Academy")
-    st.subheader("Módulo Cloud Espectral v100")
-    st.markdown("---")
-    
-    st.info("""
-    📌 **Instrucciones del Motor Cloud:**
-    1. **Seleccione el Parámetro:** Elija Textura USDA (12 Clases Variables) o pH del Suelo.
-    2. **Escena Landsat (.tar, .zip):** Suba el archivo comprimido oficial.
-    3. **Perímetro de la Finca:** Suba su archivo perimetral (`.zip` Shapefile, `.geojson`, `.kml`).
-    4. **Malla 5x5m:** Genera centroides de alta variabilidad espacial y reporte HTML ejecutivo.
-    """)
-    
-    st.markdown("---")
-    st.markdown("**Desarrollado para:** Juan Segundo Suárez Rivera")
-
-# ---------------------------------------------------------
-# CUERPO PRINCIPAL
-# ---------------------------------------------------------
-col_title1, col_title2 = st.columns([1, 6])
-with col_title1:
-    if os.path.exists("icon.png"):
-        st.image(Image.open("icon.png"), width=90)
-with col_title2:
-    st.title("Syntro Cloud Soil Engine (Malla 5x5m)")
-    st.markdown("#### Procesamiento Espectral Dinámico: 12 Clases Texturales USDA y pH")
-
-st.markdown("---")
-
-st.subheader("🛰️ 1. Parámetros de Análisis y Entrada")
-
-tipo_analisis = st.selectbox(
-    "🎯 Seleccione el Parámetro a Evaluar en la Malla:",
-    [
-        "Textura de Suelo (Triángulo USDA - 12 Clases Variables)", 
-        "pH del Suelo (Índice Espectral de Acidez y Alcalinidad)"
-    ],
-    help="Elija si desea procesar la zonificación textural detallada de 12 clases o el perfil de pH."
-)
-
-st.markdown(f"""
-    <div class="info-box">
-        <strong>💡 Configuración Activa - {tipo_analisis}:</strong><br>
-        El sistema procesará las bandas espectrales (B4, B6, B7), recortará con el perímetro en coordenadas UTM y generará la malla de centroides espaciados exactamente a 5x5 metros con variabilidad real por píxel.
-    </div>
-""", unsafe_allow_html=True)
-
-col1, col2 = st.columns(2)
-
-with col1:
-    uploaded_landsat = st.file_uploader(
-        "Archivo de Escena Landsat (.tar, .zip, .rar)", 
-        type=["tar", "zip", "rar", "gz"],
-        help="Suba el archivo comprimido de la escena Landsat."
-    )
-
-with col2:
-    uploaded_vector = st.file_uploader(
-        "Límites Perimetrales del Área (.zip con Shapefile, .geojson, .kml)", 
-        type=["zip", "geojson", "kml", "shp"],
-        help="Suba el archivo que delimita la finca a evaluar."
-    )
-
-st.markdown("---")
-st.markdown("<br>", unsafe_allow_html=True)
-
-# Botón único de ejecución
-if st.button("🚀 Ejecutar Procesamiento y Malla 5x5m"):
-    if uploaded_landsat is not None and uploaded_vector is not None:
-        with st.spinner(f"Procesando {tipo_analisis} en malla de 5x5m, aplicando bandas B4/B6/B7 y construyendo reportes..."):
-            
+class InterpolacionIDWApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Syntro - Interpolación IDW Inteligente (Auto-Alineación)")
+        self.root.geometry("700x720")
+        self.root.configure(bg="#2b2b2b")
+        
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure("TLabel", background="#2b2b2b", foreground="#ffffff", font=("Segoe UI", 10))
+        style.configure("TButton", font=("Segoe UI", 10, "bold", background="#4CAF50"), foreground="white", borderwidth=3, relief="raised")
+        style.map("TButton", background=[("active", "#45a049")])
+        style.configure("Horizontal.TProgressbar", background="#4CAF50", troughcolor="#1e1e1e", bordercolor="#2b2b2b", lightcolor="#4CAF50", darkcolor="#4CAF50")
+        
+        self.archivo_puntos = tk.StringVar()
+        self.archivo_poligono = tk.StringVar()
+        self.carpeta_salida = tk.StringVar()
+        self.columna_seleccionada = tk.StringVar()
+        self.calidad_malla = tk.StringVar(value="800")
+        self.sigma_suavizado = tk.StringVar(value="15.0")
+        
+        self.crear_widgets()
+        self.setup_logging()
+        
+    def setup_logging(self):
+        self.logger = logging.getLogger("InterpolacionIDWSyntro")
+        self.logger.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        self.log_handler = TextHandler(self.log_text)
+        self.log_handler.setFormatter(formatter)
+        self.logger.addHandler(self.log_handler)
+        self.logger.info("Bienvenido Juan Suárez. Módulo con auto-alineación CRS activo.")
+        
+    def crear_widgets(self):
+        main_frame = tk.Frame(self.root, bg="#2b2b2b")
+        main_frame.pack(padx=20, pady=20, fill=tk.BOTH, expand=True)
+        
+        lbl_titulo = tk.Label(main_frame, text="Interpolación IDW con Auto-Alineación (COG)", font=("Segoe UI", 14, "bold"), bg="#2b2b2b", fg="#4CAF50")
+        lbl_titulo.grid(row=0, column=0, columnspan=3, pady=(0, 15))
+        
+        # Archivo Puntos
+        ttk.Label(main_frame, text="Archivo de Puntos:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main_frame, textvariable=self.archivo_puntos, width=42).grid(row=1, column=1, padx=5, pady=5)
+        tk.Button(main_frame, text="Seleccionar", command=self.cargar_puntos_inteligente, bg="#2196F3", fg="white", relief="raised", borderwidth=2).grid(row=1, column=2, pady=5)
+        
+        # Campo numérico (Combobox inteligente)
+        ttk.Label(main_frame, text="Campo Numérico (Z):").grid(row=2, column=0, sticky=tk.W, pady=5)
+        self.combo_campos = ttk.Combobox(main_frame, textvariable=self.columna_seleccionada, width=40, state="readonly")
+        self.combo_campos.grid(row=2, column=1, padx=5, pady=5, sticky=tk.W)
+        
+        # Polígono
+        ttk.Label(main_frame, text="Polígono Área Estudio:").grid(row=3, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main_frame, textvariable=self.archivo_poligono, width=42).grid(row=3, column=1, padx=5, pady=5)
+        tk.Button(main_frame, text="Seleccionar", command=lambda: self.seleccionar_archivo(self.archivo_poligono, "Polígono"), bg="#9C27B0", fg="white", relief="raised", borderwidth=2).grid(row=3, column=2, pady=5)
+        
+        # Calidad
+        ttk.Label(main_frame, text="Calidad (píxeles, ej: 800):").grid(row=4, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main_frame, textvariable=self.calidad_malla, width=42).grid(row=4, column=1, padx=5, pady=5)
+        
+        # Suavizado Sigma
+        ttk.Label(main_frame, text="Suavizado (Sigma):").grid(row=5, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main_frame, textvariable=self.sigma_suavizado, width=42).grid(row=5, column=1, padx=5, pady=5)
+        
+        # Carpeta Salida
+        ttk.Label(main_frame, text="Carpeta de Salida:").grid(row=6, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main_frame, textvariable=self.carpeta_salida, width=42).grid(row=6, column=1, padx=5, pady=5)
+        tk.Button(main_frame, text="Seleccionar", command=self.seleccionar_carpeta, bg="#2196F3", fg="white", relief="raised", borderwidth=2).grid(row=6, column=2, pady=5)
+        
+        # Botón Ejecutar
+        self.btn_ejecutar = tk.Button(main_frame, text="Procesar y Alinear", command=self.ejecutar_hilo, bg="#ff9800", fg="white", font=("Segoe UI", 12, "bold"), relief="raised", borderwidth=3)
+        self.btn_ejecutar.grid(row=7, column=0, columnspan=3, pady=15)
+        
+        # Barra de progreso y temporizador
+        self.progress = ttk.Progressbar(main_frame, orient=tk.HORIZONTAL, length=550, mode='determinate', style="Horizontal.TProgressbar")
+        self.progress.grid(row=8, column=0, columnspan=3, pady=10)
+        
+        self.lbl_timer = tk.Label(main_frame, text="Tiempo Transcurrido: 00:00:00", bg="#2b2b2b", fg="#ffffff", font=("Segoe UI", 10))
+        self.lbl_timer.grid(row=9, column=0, columnspan=3, pady=5)
+        
+        # Log
+        self.log_text = tk.Text(main_frame, height=8, width=80, bg="#1e1e1e", fg="#4CAF50", font=("Consolas", 9), relief="sunken", borderwidth=2)
+        self.log_text.grid(row=10, column=0, columnspan=3, pady=10)
+        
+    def cargar_puntos_inteligente(self):
+        archivo = filedialog.askopenfilename(title="Seleccionar Puntos", filetypes=[("Shapefile/GeoJSON", "*.shp *.geojson"), ("Todos", "*.*")])
+        if archivo:
+            self.archivo_puntos.set(archivo)
+            self.logger.info(f"Puntos cargados: {os.path.basename(archivo)}")
             try:
-                with tempfile.TemporaryDirectory() as tmpdirname:
-                    # 1. Procesar archivo Landsat comprimido
-                    landsat_path = os.path.join(tmpdirname, uploaded_landsat.name)
-                    with open(landsat_path, "wb") as f:
-                        f.write(uploaded_landsat.getbuffer())
-                        
-                    nombre_archivo = uploaded_landsat.name.lower()
-                    if nombre_archivo.endswith('.zip'):
-                        with zipfile.ZipFile(landsat_path, 'r') as zip_ref:
-                            zip_ref.extractall(tmpdirname)
-                    elif nombre_archivo.endswith(('.tar', '.gz', '.tgz')):
-                        with tarfile.open(landsat_path, 'r:*') as tar_ref:
-                            tar_ref.extractall(path=tmpdirname)
-                    elif nombre_archivo.endswith('.rar'):
-                        try:
-                            import rarfile
-                            with rarfile.RarFile(landsat_path) as rar_ref:
-                                rar_ref.extractall(tmpdirname)
-                        except Exception:
-                            import subprocess
-                            subprocess.run(["unrar", "x", landsat_path, tmpdirname], check=True)
-                    else:
-                        with tarfile.open(landsat_path, 'r:*') as tar_ref:
-                            tar_ref.extractall(path=tmpdirname)
-                        
-                    # Buscar bandas B4, B6 y B7
-                    b4_path, b6_path, b7_path = None, None, None
-                    for root, dirs, files in os.walk(tmpdirname):
-                        for file in files:
-                            nu = file.upper()
-                            if '_B4.TIF' in nu and 'QA' not in nu:
-                                b4_path = os.path.join(root, file)
-                            elif '_B6.TIF' in nu and 'QA' not in nu:
-                                b6_path = os.path.join(root, file)
-                            elif '_B7.TIF' in nu and 'QA' not in nu:
-                                b7_path = os.path.join(root, file)
-                                
-                    if not all([b4_path, b6_path, b7_path]):
-                        st.error("No se encontraron las bandas B4, B6 y B7 dentro del archivo comprimido de Landsat.")
-                        st.stop()
-
-                    # 2. Procesar archivo perimetral
-                    vec_path = os.path.join(tmpdirname, uploaded_vector.name)
-                    with open(vec_path, "wb") as f:
-                        f.write(uploaded_vector.getbuffer())
-                        
-                    if uploaded_vector.name.endswith('.zip'):
-                        with zipfile.ZipFile(vec_path, 'r') as zip_ref:
-                            zip_ref.extractall(tmpdirname)
-                        shp_file = None
-                        for root, dirs, files in os.walk(tmpdirname):
-                            for file in files:
-                                if file.endswith('.shp'):
-                                    shp_file = os.path.join(root, file)
-                                    break
-                            if shp_file:
-                                break
-                        if not shp_file:
-                            raise ValueError("No se encontró ningún archivo .shp dentro del archivo .zip perimetral.")
-                        gdf = gpd.read_file(shp_file)
-                    else:
-                        gdf = gpd.read_file(vec_path)
-                        
-                    if gdf.crs is None:
-                        gdf.set_crs(epsg=4326, inplace=True)
-                    else:
-                        gdf = gdf.to_crs(epsg=4326)
-                        
-                    # Zona UTM automática
-                    centroid = gdf.unary_union.centroid
-                    epsg_utm = 32619 if centroid.x > -72 else 32618
-                    
-                    gdf_utm = gdf.to_crs(epsg=epsg_utm)
-                    polygon_utm = gdf_utm.unary_union
-                    
-                    area_total_m2 = polygon_utm.area
-                    area_total_ha = area_total_m2 / 10000.0
-                    
-                    # 3. Recorte ráster seguro
-                    def recortar_banda_5m(path_b):
-                        with rasterio.open(path_b) as src_b:
-                            img_b, trans_b = mask(src_b, [polygon_utm], crop=True, nodata=0, all_touched=True)
-                            arr = img_b[0].astype(np.float32)
-                            arr[arr == 0] = -9999
-                            return arr, trans_b
-
-                    b4, trans_out = recortar_banda_5m(b4_path)
-                    b6, _ = recortar_banda_5m(b6_path)
-                    b7, _ = recortar_banda_5m(b7_path)
-                    
-                    # 4. Modelos Espectrales Dinámicos (12 Clases USDA vs pH)
-                    mask_val = (b4 > 0) & (b4 != -9999) & (b6 > 0) & (b6 != -9999)
-                    indice = np.zeros(b4.shape, dtype=np.float32)
-                    
-                    is_ph = "pH" in tipo_analisis
-                    
-                    if np.any(mask_val):
-                        if not is_ph:
-                            # Modelo de Textura USDA - 12 Clases Oficiales (Variable por percentiles dinámicos)
-                            indice[mask_val] = (b6[mask_val] + b7[mask_val]) / (b4[mask_val] + 1.0)
-                            vals = indice[mask_val]
-                            
-                            # Generación de percentiles para distribuir en las 12 clases del triángulo USDA
-                            pcts = np.percentile(vals, [8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88])
-                            
-                            cat_map = np.zeros(b4.shape, dtype=np.uint8)
-                            cat_map[mask_val] = np.where(indice[mask_val] <= pcts[0], 1,
-                                                np.where(indice[mask_val] <= pcts[1], 2,
-                                                np.where(indice[mask_val] <= pcts[2], 3,
-                                                np.where(indice[mask_val] <= pcts[3], 4,
-                                                np.where(indice[mask_val] <= pcts[4], 5,
-                                                np.where(indice[mask_val] <= pcts[5], 6,
-                                                np.where(indice[mask_val] <= pcts[6], 7,
-                                                np.where(indice[mask_val] <= pcts[7], 8,
-                                                np.where(indice[mask_val] <= pcts[8], 9,
-                                                np.where(indice[mask_val] <= pcts[9], 10,
-                                                np.where(indice[mask_val] <= pcts[10], 11, 12)))))))))))
-                        else:
-                            # Modelo Espectral de pH del Suelo (5 Rangos)
-                            indice[mask_val] = 7.0 + ((b7[mask_val] - b4[mask_val]) / (b6[mask_val] + 1.0)) * 0.5
-                            vals = indice[mask_val]
-                            p20, p40, p60, p80 = np.percentile(vals, [20, 40, 60, 80])
-                            
-                            cat_map = np.zeros(b4.shape, dtype=np.uint8)
-                            cat_map[mask_val] = np.where(indice[mask_val] <= p20, 1,
-                                                np.where(indice[mask_val] <= p40, 2,
-                                                np.where(indice[mask_val] <= p60, 3,
-                                                np.where(indice[mask_val] <= p80, 4, 5))))
-                    else:
-                        cat_map = np.ones(b4.shape, dtype=np.uint8) * (3 if not is_ph else 3)
-                        
-                    if not is_ph:
-                        nombres_dict = {
-                            1: "Arena (Sand)",
-                            2: "Arena Franca (Loamy Sand)",
-                            3: "Franco Arenoso (Sandy Loam)",
-                            4: "Franco (Loam)",
-                            5: "Franco Limoso (Silt Loam)",
-                            6: "Limo (Silt)",
-                            7: "Franco Arcillo-Arenoso (Sandy Clay Loam)",
-                            8: "Franco Arcilloso (Clay Loam)",
-                            9: "Franco Arcillo-Limoso (Silty Clay Loam)",
-                            10: "Arcillo Arenoso (Sandy Clay)",
-                            11: "Arcillo Limoso (Silty Clay)",
-                            12: "Arcilloso (Clay)"
-                        }
-                        titulo_reporte = "Informe Técnico Textural USDA (12 Clases)"
-                        archivo_sufijo = "USDA_12_CLASES"
-                    else:
-                        nombres_dict = {
-                            1: "Extremadamente Ácido (< 5.0)",
-                            2: "Fuertemente Ácido (5.0 - 5.5)",
-                            3: "Moderadamente Ácido (5.6 - 6.0)",
-                            4: "Ligeramente Ácido a Neutro (6.1 - 6.8)",
-                            5: "Neutro a Alcalino (> 6.9)"
-                        }
-                        titulo_reporte = "Informe Técnico de pH del Suelo"
-                        archivo_sufijo = "PH_SUELO"
-                    
-                    # Generación de la malla estricta de 5x5 metros
-                    minx, miny, maxx, maxy = polygon_utm.bounds
-                    x_coords = np.arange(minx, maxx, 5.0)
-                    y_coords = np.arange(miny, maxy, 5.0)
-                    
-                    num_clases_total = 12 if not is_ph else 5
-                    features = []
-                    conteo_clases = {i: 0 for i in range(1, num_clases_total + 1)}
-                    
-                    id_pto = 1
-                    for x in x_coords:
-                        for y in y_coords:
-                            pt = Point(x, y)
-                            if polygon_utm.contains(pt):
-                                row, col = rasterio.transform.rowcol(trans_out, x, y)
-                                if 0 <= row < cat_map.shape[0] and 0 <= col < cat_map.shape[1]:
-                                    c_id = int(cat_map[row, col])
-                                    if c_id == 0 or c_id > num_clases_total:
-                                        c_id = 4 if not is_ph else 3
-                                else:
-                                    c_id = 4 if not is_ph else 3
-                                    
-                                conteo_clases[c_id] += 1
-                                
-                                prop_dict = {
-                                    "id": id_pto,
-                                    "CLASE_ID": c_id,
-                                    "RESOLUCION": "5x5m"
-                                }
-                                if not is_ph:
-                                    prop_dict["CLASE_USDA"] = nombres_dict.get(c_id, "Franco")
-                                else:
-                                    prop_dict["RANGO_PH"] = nombres_dict.get(c_id, "Neutro")
-                                    
-                                features.append({
-                                    "type": "Feature",
-                                    "geometry": {
-                                        "type": "Point",
-                                        "coordinates": [x, y]
-                                    },
-                                    "properties": prop_dict
-                                })
-                                id_pto += 1
-                                    
-                    total_celdas = len(features)
-                    ha_px = 0.0025 # 5x5m = 25 m² = 0.0025 ha
-                    
-                    areas, porcentajes = {}, {}
-                    for i in range(1, num_clases_total + 1):
-                        ha_clase = conteo_clases[i] * ha_px
-                        areas[i] = ha_clase
-                        porcentajes[i] = (conteo_clases[i] / total_celdas) * 100 if total_celdas > 0 else 0.0
-                        
-                    for feat in features:
-                        cid = feat["properties"]["CLASE_ID"]
-                        feat["properties"]["area_ha"] = round(areas[cid], 4)
-                        feat["properties"]["porcentaje"] = round(porcentajes[cid], 2)
-                        
-                    gdf_puntos_utm = gpd.GeoDataFrame.from_features(features, crs=f"EPSG:{epsg_utm}")
-                    gdf_puntos_wgs84 = gdf_puntos_utm.to_crs(epsg=4326)
-                    geojson_string = gdf_puntos_wgs84.to_json()
-                    
+                gdf = gpd.read_file(archivo)
+                cols_numericas = gdf.select_dtypes(include=[np.number]).columns.tolist()
+                
+                if not cols_numericas:
+                    messagebox.showwarning("Atención", "El archivo no contiene campos numéricos válidos.")
+                    return
+                
+                self.combo_campos['values'] = cols_numericas
+                self.combo_campos.set(cols_numericas[0])
+                self.logger.info(f"Campos detectados: {cols_numericas}")
             except Exception as e:
-                st.error(f"Error procesando la malla de 5x5m: {e}")
-                st.stop()
-
-            # 5. Construcción del Informe HTML Ejecutivo Profesional
-            chart_labels = [nombres_dict[i].split("(")[0].strip() for i in range(1, num_clases_total + 1) if areas[i] > 0]
-            chart_data = [round(areas[i], 2) for i in range(1, num_clases_total + 1) if areas[i] > 0]
-            chart_colors = ["#991b1b", "#dc2626", "#ea580c", "#f97316", "#ca8a04", "#eab308", "#16a34a", "#22c55e", "#10b981", "#06b6d4", "#3b82f6", "#6366f1"][:len(chart_data)]
-
-            filas_html = ""
-            for i in range(1, num_clases_total + 1):
-                if areas[i] > 0:
-                    filas_html += f"""
-                    <tr>
-                        <td><strong>{i}. {nombres_dict[i]}</strong></td>
-                        <td>{areas[i]:.2f} ha</td>
-                        <td>{porcentajes[i]:.1f}%</td>
-                    </tr>
-                    """
-
-            html_content = f"""<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <title>Syntro Academy - {titulo_reporte} (Malla 5x5m)</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #0b132b;
-            color: #ffffff;
-            margin: 0;
-            padding: 30px;
-        }}
-        .container {{
-            max-width: 950px;
-            margin: auto;
-            background: #1c2541;
-            padding: 40px;
-            border-radius: 14px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.6);
-            border: 1px solid #3a86ff;
-        }}
-        .header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 2px solid #41ead4;
-            padding-bottom: 20px;
-            margin-bottom: 25px;
-        }}
-        .header h1 {{
-            color: #41ead4;
-            font-size: 24px;
-            margin: 0;
-        }}
-        .header p {{
-            color: #8d99ae;
-            font-size: 13px;
-            margin: 5px 0 0 0;
-        }}
-        .meta-box {{
-            background: #0b132b;
-            padding: 15px 20px;
-            border-radius: 8px;
-            margin-bottom: 25px;
-            font-size: 14px;
-            border-left: 5px solid #41ead4;
-        }}
-        table {{
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 30px;
-        }}
-        th, td {{
-            padding: 10px 15px;
-            text-align: left;
-            border-bottom: 1px solid rgba(58, 134, 255, 0.3);
-            font-size: 13px;
-        }}
-        th {{
-            background-color: #0b132b;
-            color: #41ead4;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }}
-        tr:hover {{
-            background-color: rgba(65, 234, 212, 0.05);
-        }}
-        .total-row {{
-            font-weight: bold;
-            background-color: #0b132b;
-            color: #41ead4;
-            font-size: 14px;
-        }}
-        .chart-container {{
-            width: 90%;
-            margin: auto;
-            background: #0b132b;
-            padding: 20px;
-            border-radius: 10px;
-            border: 1px solid rgba(58, 134, 255, 0.2);
-        }}
-        .footer {{
-            margin-top: 40px;
-            text-align: center;
-            font-size: 12px;
-            color: #8d99ae;
-            border-top: 1px solid rgba(141, 153, 174, 0.2);
-            padding-top: 15px;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <div>
-                <h1>SYNTRO ACADEMY</h1>
-                <p>{titulo_reporte} por Percepción Remota</p>
-            </div>
-            <div style="text-align: right;">
-                <p><strong>Consultor:</strong> Ing. Juan Segundo Suárez Rivera</p>
-                <p><strong>Fecha:</strong> {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
-            </div>
-        </div>
-
-        <div class="meta-box">
-            <strong>📋 Resumen Ejecutivo del Proyecto:</strong><br>
-            - <strong>Parámetro Evaluado:</strong> {tipo_analisis}<br>
-            - <strong>Escena Analizada:</strong> {uploaded_landsat.name}<br>
-            - <strong>Modelo Espectral Dinámico:</strong> Bandas B4, B6, B7<br>
-            - <strong>Malla Detallada:</strong> 5 x 5 metros (25 m² por celda)<br>
-            - <strong>Superficie Total Evaluada:</strong> {area_total_ha:.2f} Hectáreas ({area_total_m2:,.2f} m²)<br>
-            - <strong>Total Centroides 5x5m:</strong> {total_celdas} puntos
-        </div>
-
-        <table>
-            <thead>
-                <tr>
-                    <th>Clasificación del Parámetro</th>
-                    <th>Superficie (ha)</th>
-                    <th>Distribución (%)</th>
-                </tr>
-            </thead>
-            <tbody>
-                {filas_html}
-                <tr class="total-row">
-                    <td>SUPERFICIE TOTAL EVALUADA</td>
-                    <td>{area_total_ha:.2f} ha</td>
-                    <td>100.0%</td>
-                </tr>
-            </tbody>
-        </table>
-
-        <div class="chart-container">
-            <canvas id="soilChart"></canvas>
-        </div>
-
-        <div class="footer">
-            Generado automáticamente por el motor geoespacial avanzado Syntro Cloud Engine &bull; QGIS / GeoLibre Compatible
-        </div>
-    </div>
-
-    <script>
-        const ctx = document.getElementById('soilChart').getContext('2d');
-        new Chart(ctx, {{
-            type: 'bar',
-            data: {{
-                labels: {chart_labels},
-                datasets: [{{
-                    label: 'Superficie (Hectáreas)',
-                    data: {chart_data},
-                    backgroundColor: {chart_colors},
-                    borderWidth: 1,
-                    borderRadius: 5
-                }}]
-            }},
-            options: {{
-                responsive: true,
-                plugins: {{
-                    legend: {{ display: false }},
-                    title: {{
-                        display: true,
-                        text: 'Distribución Espacial Variable - Malla 5x5m (ha)',
-                        color: '#ffffff',
-                        font: {{ size: 14 }}
-                    }}
-                }},
-                scales: {{
-                    y: {{
-                        beginAtZero: true,
-                        ticks: {{ color: '#8d99ae' }},
-                        grid: {{ color: 'rgba(141, 153, 174, 0.1)' }}
-                    }},
-                    x: {{
-                        ticks: {{ color: '#8d99ae', font: {{ size: 10 }} }},
-                        grid: {{ display: false }}
-                    }}
-                }}
-            }}
-        }});
-    </script>
-</body>
-</html>
-"""
-
-        # Resumen en texto plano
-        lineas_informe = []
-        lineas_informe.append("="*85)
-        lineas_informe.append(f"SYNTRO ACADEMY - {titulo_reporte.upper()}")
-        lineas_informe.append("="*85)
-        lineas_informe.append("CONSULTOR: ING. JUAN SEGUNDO SUAREZ RIVERA")
-        lineas_informe.append(f"PARAMETRO: {tipo_analisis}")
-        lineas_informe.append(f"ESCENA LANDSAT: {uploaded_landsat.name}")
-        lineas_informe.append(f"TOTAL CENTROIDES (5x5m): {total_celdas}")
-        lineas_informe.append(f"SUPERFICIE TOTAL EVALUADA: {area_total_ha:.2f} ha\n")
-        lineas_informe.append(f"{'CLASIFICACION':<42} | {'SUPERFICIE (ha)':<15} | {'PORCENTAJE (%)':<15}")
-        lineas_informe.append("-" * 80)
-        for i in range(1, num_clases_total + 1):
-            if areas[i] > 0:
-                lineas_informe.append(f"{nombres_dict[i]:<42} | {areas[i]:<15.2f} | {porcentajes[i]:<15.1f}%")
-        lineas_informe.append("-" * 80)
-        lineas_informe.append(f"{'SUPERFICIE TOTAL EVALUADA':<42} | {area_total_ha:<15.2f} | 100.0%")
-        lineas_informe.append("="*85)
-        resumen_dinamico = "\n".join(lineas_informe)
-
-        st.success(f"¡Proceso completado con éxito! Se generaron {total_celdas} centroides detallados de 5x5m con variabilidad espacial.")
+                self.logger.error(f"Error al leer atributos: {str(e)}")
+                messagebox.showerror("Error", f"No se pudieron leer las columnas:\n{str(e)}")
+            
+    def seleccionar_archivo(self, variable, tipo):
+        archivo = filedialog.askopenfilename(title=f"Seleccionar {tipo}", filetypes=[("Shapefile/GeoJSON", "*.shp *.geojson"), ("Todos", "*.*")])
+        if archivo:
+            variable.set(archivo)
+            self.logger.info(f"{tipo} cargado: {os.path.basename(archivo)}")
+            
+    def seleccionar_carpeta(self):
+        carpeta = filedialog.askdirectory(title="Seleccionar Destino")
+        if carpeta:
+            self.carpeta_salida.set(carpeta)
+            self.logger.info(f"Salida: {carpeta}")
+            
+    def ejecutar_hilo(self):
+        if not self.archivo_puntos.get() or not self.archivo_poligono.get() or not self.carpeta_salida.get() or not self.columna_seleccionada.get():
+            messagebox.showerror("Error", "Faltan archivos o debes seleccionar un campo numérico.")
+            return
+            
+        self.btn_ejecutar.config(state=tk.DISABLED)
+        self.progress["value"] = 0
+        threading.Thread(target=self.proceso_interpolacion, daemon=True).start()
         
-        # Métricas visuales
-        st.markdown(f"### 📊 Resultados Estadísticos - {tipo_analisis} (5x5m)")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Área Real Evaluada", f"{area_total_ha:.2f} Hectáreas", f"{total_celdas} celdas (5x5m)")
-        m2.metric("Malla Detallada", "5 x 5 metros", "Variabilidad Espacial Real")
-        m3.metric("Reportes Generados", "GeoJSON + HTML Ejecutivo", "Listos para descarga")
+    def proceso_interpolacion(self):
+        start_time = time.time()
+        self.logger.info("Iniciando validación y reproyección espacial...")
+        try:
+            self.actualizar_progreso(10, start_time)
+            
+            gdf_puntos = gpd.read_file(self.archivo_puntos.get())
+            gdf_poli = gpd.read_file(self.archivo_poligono.get())
+            
+            # SOLUCIÓN CRÍTICA: Forzar la misma proyección (CRS) para evitar el error de solapamiento
+            if gdf_puntos.crs is None:
+                self.logger.warning("El archivo de puntos no tiene CRS definido. Asignando WGS84 por defecto.")
+                gdf_puntos.set_crs("EPSG:4326", inplace=True)
+                
+            if gdf_poli.crs is None:
+                self.logger.warning("El archivo de polígono no tiene CRS definido. Asignando WGS84 por defecto.")
+                gdf_poli.set_crs("EPSG:4326", inplace=True)
+                
+            if gdf_puntos.crs != gdf_poli.crs:
+                self.logger.info(f"Reproyectando polígono de {gdf_poli.crs} a {gdf_puntos.crs}...")
+                gdf_poli = gdf_poli.to_crs(gdf_puntos.crs)
+            else:
+                self.logger.info("Los sistemas de coordenadas coinciden perfectamente.")
+            
+            campo = self.columna_seleccionada.get()
+            self.logger.info(f"Interpolando variable: '{campo}'")
+            
+            self.actualizar_progreso(25, start_time)
+            
+            x = gdf_puntos.geometry.x.values
+            y = gdf_puntos.geometry.y.values
+            z = gdf_puntos[campo].values
+            puntos = np.column_stack((x, y))
+            
+            minx, miny, maxx, maxy = gdf_poli.total_bounds
+            
+            calidad = int(self.calidad_malla.get())
+            pixel_width = (maxx - minx) / calidad
+            pixel_height = (maxy - miny) / calidad
+            
+            self.logger.info(f"Construyendo malla base de {calidad}x{calidad}...")
+            grid_x, grid_y = np.mgrid[minx:maxx:complex(0, calidad), miny:maxy:complex(0, calidad)]
+            grid_coords = np.column_stack((grid_x.ravel(), grid_y.ravel()))
+            
+            self.actualizar_progreso(40, start_time)
+            
+            self.logger.info("Ejecutando IDW (20 vecinos)...")
+            arbol = cKDTree(puntos)
+            distancias, indices = arbol.query(grid_coords, k=20) 
+            
+            distancias = np.maximum(distancias, 1e-12)
+            pesos = 1.0 / (distancias ** 2)
+            z_interp_flat = np.sum(pesos * z[indices], axis=1) / np.sum(pesos, axis=1)
+            
+            grid_z = z_interp_flat.reshape(grid_x.shape)
+            
+            self.actualizar_progreso(65, start_time)
+            
+            sigma_val = float(self.sigma_suavizado.get())
+            self.logger.info(f"Aplicando filtro gaussiano (Sigma={sigma_val})...")
+            grid_z_suavizado = gaussian_filter(grid_z, sigma=sigma_val)
+            
+            self.actualizar_progreso(75, start_time)
+            
+            temp_path = os.path.join(self.carpeta_salida.get(), "temp_grid_idw_smart.tif")
+            transform = from_origin(minx, maxy, pixel_width, pixel_height)
+            
+            with rasterio.open(
+                temp_path, 'w', driver='GTiff',
+                height=grid_z_suavizado.shape[1], width=grid_z_suavizado.shape[0],
+                count=1, dtype=str(grid_z_suavizado.dtype),
+                crs=gdf_puntos.crs, transform=transform
+            ) as dst:
+                dst.write(np.flipud(grid_z_suavizado.T), 1)
+                
+            self.actualizar_progreso(85, start_time)
+            
+            self.logger.info("Recortando al perímetro exacto (Formato COG)...")
+            geometrias = [geom for geom in gdf_poli.geometry]
+            output_path = os.path.join(self.carpeta_salida.get(), f"Mapa_Inteligente_{campo}.tif")
+            
+            with rasterio.open(temp_path) as src:
+                out_image, out_transform = mask(src, geometrias, crop=True, nodata=np.nan)
+                out_meta = src.meta.copy()
+                
+            out_meta.update({
+                "driver": "COG",
+                "height": out_image.shape[1],
+                "width": out_image.shape[2],
+                "transform": out_transform,
+                "nodata": np.nan,
+                "compress": "deflate"
+            })
+            
+            with rasterio.open(output_path, "w", **out_meta) as dest:
+                dest.write(out_image)
+                
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+                
+            self.actualizar_progreso(100, start_time)
+            self.logger.info("¡Proceso finalizado con éxito!")
+            messagebox.showinfo("Éxito", f"Mapa inteligente generado en:\n{output_path}")
+            
+        except Exception as e:
+            self.logger.error(f"Error crítico: {str(e)}")
+            messagebox.showerror("Error", f"Fallo en el proceso:\n{str(e)}")
+        finally:
+            self.btn_ejecutar.config(state=tk.NORMAL)
+            
+    def actualizar_progreso(self, valor, start_time):
+        self.progress["value"] = valor
+        elapsed = int(time.time() - start_time)
+        hrs, rem = divmod(elapsed, 3600)
+        mins, secs = divmod(rem, 60)
+        self.lbl_timer.config(text=f"Tiempo Transcurrido: {hrs:02d}:{mins:02d}:{secs:02d}")
+        self.root.update_idletasks()
+
+class TextHandler(logging.Handler):
+    def __init__(self, text_widget):
+        super().__init__()
+        self.text_widget = text_widget
         
-        st.text(resumen_dinamico)
-        
-        st.markdown("---")
-        st.subheader("📥 Descarga de Archivos de Salida")
-        
-        col_d1, col_d2, col_d3 = st.columns(3)
-        with col_d1:
-            st.download_button(
-                label="📥 Descargar GeoJSON de Centroides (5x5m)",
-                data=geojson_string,
-                file_name=f"SYNTRO_{archivo_sufijo}_PUNTOS_5x5m.geojson",
-                mime="application/json"
-            )
-        with col_d2:
-            st.download_button(
-                label="📥 Descargar Informe HTML Ejecutivo",
-                data=html_content,
-                file_name=f"INFORME_{archivo_sufijo}_EJECUTIVO_5x5m.html",
-                mime="text/html"
-            )
-        with col_d3:
-            st.download_button(
-                label="📥 Descargar Informe Txt (.txt)",
-                data=resumen_dinamico,
-                file_name=f"INFORME_{archivo_sufijo}_5x5m.txt",
-                mime="text/plain"
-            )
-    else:
-        st.error("⚠️ Debe cargar tanto el archivo comprimido de Landsat como el archivo perimetral antes de ejecutar.")
+    def emit(self, record):
+        msg = self.format(record)
+        def append():
+            self.text_widget.configure(state='normal')
+            self.text_widget.insert(tk.END, msg + '\n')
+            self.text_widget.see(tk.END)
+            self.text_widget.configure(state='disabled')
+        self.text_widget.after(0, append)
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = InterpolacionIDWApp(root)
+    root.mainloop()
