@@ -8,18 +8,42 @@ from scipy.ndimage import gaussian_filter
 import rasterio
 from rasterio.transform import from_origin
 from rasterio.mask import mask
+import datetime
 
-st.set_page_config(page_title="Syntro - Interpolación IDW", page_icon="🌍", layout="centered")
+# Configuración de página
+st.set_page_config(page_title="Syntro Academy - Interpolación IDW", page_icon="🌍", layout="wide")
 
-st.markdown("<h2 style='color: #4CAF50;'>Syntro Academy - Módulo de Interpolación IDW</h2>", unsafe_allow_html=True)
-st.write("Bienvenido Juan Suárez. Sube tus puntos y tu polígono perimetral para generar el mapa inteligente optimizado.")
+# --- BARRA LATERAL DE MARCA SYNTRÓ ---
+with st.sidebar:
+    st.markdown("""
+        <div style="text-align: center; padding: 10px;">
+            <h1 style='color: #4CAF50; margin-bottom: 0;'>SYNTRÓ</h1>
+            <p style='color: #aaaaaa; font-size: 14px;'>Academy & Spatial Intelligence</p>
+            <hr style='border-color: #4CAF50;'>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("### 👤 Sesión Activa")
+    st.info("Usuario: **Juan Suárez**\n\nMódulo: **Interpolación IDW & Reportes Bio-espaciales**")
+    
+    st.markdown("---")
+    st.markdown("### 📌 Instrucciones")
+    st.markdown("1. Sube tu archivo de puntos (Shapefile .zip o GeoJSON).\n2. Selecciona el campo numérico.\n3. Sube el polígono perimetral.\n4. Ajusta la calidad y el suavizado.\n5. Ejecuta y descarga tu ráster COG y el **Informe Técnico**.")
 
-# Contenedor de subida de archivos
-st.markdown("### 📁 Archivos de Entrada")
-uploaded_puntos = st.file_uploader("Subir Archivo de Puntos (Shapefile comprimido .zip o GeoJSON)", type=["zip", "geojson", "json"])
-uploaded_poli = st.file_uploader("Subir Polígono Perimetral del Área de Estudio (.zip o GeoJSON)", type=["zip", "geojson", "json"])
+# --- CUERPO PRINCIPAL ---
+st.markdown("<h2 style='color: #4CAF50;'>Módulo de Interpolación IDW de Alta Precisión</h2>", unsafe_allow_html=True)
+st.write("Generación de superficies continuas optimizadas para GeoLibre y análisis biofinanciero de lotes.")
 
-# Función auxiliar para guardar archivos subidos temporalmente
+col1, col2 = st.columns(2)
+
+with col1:
+    st.markdown("### 📁 1. Archivos de Entrada")
+    uploaded_puntos = st.file_uploader("Subir Archivo de Puntos (ZIP o GeoJSON)", type=["zip", "geojson", "json"])
+
+with col2:
+    st.markdown("### 📐 2. Delimitación")
+    uploaded_poli = st.file_uploader("Subir Polígono Perimetral (ZIP o GeoJSON)", type=["zip", "geojson", "json"])
+
 def guardar_archivo_temporal(uploaded_file):
     temp_dir = tempfile.mkdtemp()
     path = os.path.join(temp_dir, uploaded_file.name)
@@ -27,7 +51,6 @@ def guardar_archivo_temporal(uploaded_file):
         f.write(uploaded_file.getbuffer())
     return path
 
-# Si se cargan los puntos, detectamos los campos numéricos de forma inteligente
 if uploaded_puntos is not None:
     try:
         puntos_path = guardar_archivo_temporal(uploaded_puntos)
@@ -35,15 +58,19 @@ if uploaded_puntos is not None:
         
         cols_numericas = gdf_puntos.select_dtypes(include=[np.number]).columns.tolist()
         
-        st.markdown("### ⚙️ Parámetros de Interpolación")
-        campo_seleccionado = st.selectbox("Seleccionar Campo Numérico (Z) a Interpolar", cols_numericas)
-        
-        calidad = st.slider("Calidad de la Malla (Resolución en píxeles)", min_value=200, max_value=1500, value=800, step=100)
-        sigma = st.slider("Suavizado Espacial (Sigma)", min_value=1.0, max_value=30.0, value=15.0, step=0.5)
+        st.markdown("---")
+        st.markdown("### ⚙️ 3. Parámetros de Procesamiento")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            campo_seleccionado = st.selectbox("Campo Numérico (Z) a Interpolar", cols_numericas)
+        with c2:
+            calidad = st.slider("Calidad de Malla (Píxeles)", min_value=200, max_value=1500, value=800, step=100)
+        with c3:
+            sigma = st.slider("Suavizado Espacial (Sigma)", min_value=1.0, max_value=30.0, value=15.0, step=0.5)
         
         if uploaded_poli is not None:
-            if st.button("🚀 Ejecutar Procesamiento y Recorte"):
-                with st.spinner("Procesando interpolación IDW y ajustando perimetral..."):
+            if st.button("🚀 Ejecutar Procesamiento, Recorte y Generar Informe", type="primary"):
+                with st.spinner("Procesando malla IDW, aplicando filtro gaussiano y calculando estadísticas..."):
                     try:
                         poli_path = guardar_archivo_temporal(uploaded_poli)
                         gdf_poli = gpd.read_file(poli_path)
@@ -57,18 +84,17 @@ if uploaded_puntos is not None:
                         if gdf_puntos.crs != gdf_poli.crs:
                             gdf_poli = gdf_poli.to_crs(gdf_puntos.crs)
                             
-                        # Extracción de coordenadas y valores
+                        # Datos de puntos
                         x = gdf_puntos.geometry.x.values
                         y = gdf_puntos.geometry.y.values
                         z = gdf_puntos[campo_seleccionado].values
                         puntos = np.column_stack((x, y))
                         
                         minx, miny, maxx, maxy = gdf_poli.total_bounds
-                        
                         pixel_width = (maxx - minx) / calidad
                         pixel_height = (maxy - miny) / calidad
                         
-                        # Malla y cálculo IDW
+                        # Malla IDW
                         grid_x, grid_y = np.mgrid[minx:maxx:complex(0, calidad), miny:maxy:complex(0, calidad)]
                         grid_coords = np.column_stack((grid_x.ravel(), grid_y.ravel()))
                         
@@ -80,10 +106,10 @@ if uploaded_puntos is not None:
                         z_interp_flat = np.sum(pesos * z[indices], axis=1) / np.sum(pesos, axis=1)
                         grid_z = z_interp_flat.reshape(grid_x.shape)
                         
-                        # Suavizado gaussiano
+                        # Suavizado
                         grid_z_suavizado = gaussian_filter(grid_z, sigma=sigma)
                         
-                        # Archivo temporal para rasterio
+                        # Guardado temporal y recorte
                         temp_tif = os.path.join(tempfile.gettempdir(), "temp_grid.tif")
                         transform = from_origin(minx, maxy, pixel_width, pixel_height)
                         
@@ -95,9 +121,8 @@ if uploaded_puntos is not None:
                         ) as dst:
                             dst.write(np.flipud(grid_z_suavizado.T), 1)
                             
-                        # Recorte (Mask) con el polígono
                         geometrias = [geom for geom in gdf_poli.geometry]
-                        output_tif = os.path.join(tempfile.gettempdir(), f"Mapa_Inteligente_{campo_seleccionado}.tif")
+                        output_tif = os.path.join(tempfile.gettempdir(), f"Syntro_IDW_{campo_seleccionado}.tif")
                         
                         with rasterio.open(temp_tif) as src:
                             out_image, out_transform = mask(src, geometrias, crop=True, nodata=np.nan)
@@ -115,20 +140,68 @@ if uploaded_puntos is not None:
                         with rasterio.open(output_tif, "w", **out_meta) as dest:
                             dest.write(out_image)
                             
-                        st.success("¡Proceso completado con éxito!")
+                        # --- CÁLCULO DE ESTADÍSTICAS PARA EL INFORME ---
+                        val_validos = out_image[~np.isnan(out_image)]
+                        min_val = float(np.min(val_validos))
+                        max_val = float(np.max(val_validos))
+                        mean_val = float(np.mean(val_validos))
+                        std_val = float(np.std(val_validos))
                         
-                        with open(output_tif, "rb") as file:
-                            st.download_button(
-                                label="📥 Descargar Mapa GeoTIFF (COG)",
-                                data=file,
-                                file_name=f"Mapa_Inteligente_{campo_seleccionado}.tif",
-                                mime="image/tiff"
-                            )
+                        fecha_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        
+                        informe_texto = f"""==================================================
+              SYNTRÓ ACADEMY - INFORME TÉCNICO ESPACIAL
+==================================================
+Fecha de Generación: {fecha_str}
+Especialista: Juan Suárez
+Variable Analizada: {campo_seleccionado}
+--------------------------------------------------
+PARÁMETROS DE MODELADO:
+- Método de Interpolación: IDW (Inverse Distance Weighting) con cKDTree (k=20)
+- Suavizado Espacial (Sigma): {sigma}
+- Resolución de Malla: {calidad}x{calidad} píxeles
+- Sistema de Coordenadas (CRS): {gdf_puntos.crs}
+--------------------------------------------------
+ESTADÍSTICAS DESCRIPTIVAS DEL LOTE:
+- Valor Mínimo: {min_val:.4f}
+- Valor Máximo: {max_val:.4f}
+- Valor Promedio (Media): {mean_val:.4f}
+- Desviación Estándar: {std_val:.4f}
+==================================================
+Syntro Spatial Pro - Todos los derechos reservados.
+"""
+                        informe_path = os.path.join(tempfile.gettempdir(), f"Informe_Syntro_{campo_seleccionado}.txt")
+                        with open(informe_path, "w", encoding="utf-8") as f:
+                            f.write(informe_texto)
                             
+                        st.success("¡Proceso de interpolación y generación de informe finalizado con éxito!")
+                        
+                        # Sección de Descargas
+                        st.markdown("---")
+                        st.markdown("### 📥 Resultados Disponibles para Descarga")
+                        
+                        col_d1, col_d2 = st.columns(2)
+                        with col_d1:
+                            with open(output_tif, "rb") as file:
+                                st.download_button(
+                                    label="📥 Descargar Mapa COG (.tif)",
+                                    data=file,
+                                    file_name=f"Syntro_IDW_{campo_seleccionado}.tif",
+                                    mime="image/tiff"
+                                )
+                        with col_d2:
+                            with open(informe_path, "rb") as file:
+                                st.download_button(
+                                    label="📄 Descargar Informe Técnico (.txt)",
+                                    data=file,
+                                    file_name=f"Informe_Syntro_{campo_seleccionado}.txt",
+                                    mime="text/plain"
+                                )
+                                
                     except Exception as e:
                         st.error(f"Error procesando los datos espaciales: {str(e)}")
         else:
-            st.info("Por favor, carga también el archivo del polígono perimetral para poder recortar el mapa.")
+            st.info("⚠️ Por favor, carga también el archivo del polígono perimetral para realizar el recorte exacto.")
             
     except Exception as e:
         st.error(f"Error leyendo el archivo de puntos: {str(e)}")
