@@ -16,7 +16,6 @@ st.set_page_config(page_title="Syntro Academy - Interpolación IDW", page_icon="
 
 # --- BARRA LATERAL DE MARCA SYNTRO ---
 with st.sidebar:
-    # Intento de cargar el logo oficial de Syntro desde el repositorio
     logo_path = None
     for posible_logo in ["icon.png", "LOGO.png", "logo1-1.png"]:
         if os.path.exists(posible_logo):
@@ -40,7 +39,7 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("### 📌 Instrucciones")
-    st.markdown("1. Sube tu archivo de puntos (Shapefile .zip o GeoJSON).\n2. Selecciona el campo numérico.\n3. Sube el polígono perimetral.\n4. Ajusta la calidad y el suavizado.\n5. Ejecuta y descarga tu ráster COG y el **Informe Técnico**.")
+    st.markdown("1. Sube tu archivo de puntos (Shapefile .zip o GeoJSON).\n2. Sube el polígono perimetral.\n3. Selecciona el campo numérico y ajusta el suavizado.\n4. Haz clic en **Ejecutar Procesamiento** y descarga tu ráster COG y el **Informe Técnico**.")
 
 # --- CUERPO PRINCIPAL ---
 st.markdown("<h2 style='color: #4CAF50;'>Módulo de Interpolación IDW de Alta Precisión</h2>", unsafe_allow_html=True)
@@ -63,6 +62,7 @@ def guardar_archivo_temporal(uploaded_file):
         f.write(uploaded_file.getbuffer())
     return path
 
+# Si se cargan los puntos, mostramos los controles inmediatamente
 if uploaded_puntos is not None:
     try:
         puntos_path = guardar_archivo_temporal(uploaded_puntos)
@@ -79,9 +79,14 @@ if uploaded_puntos is not None:
             calidad = st.slider("Calidad de Malla (Píxeles)", min_value=200, max_value=1500, value=800, step=100)
         with c3:
             sigma = st.slider("Suavizado Espacial (Sigma)", min_value=1.0, max_value=30.0, value=15.0, step=0.5)
+            
+        st.markdown("---")
         
-        if uploaded_poli is not None:
-            if st.button("🚀 Ejecutar Procesamiento, Recorte y Generar Informe", type="primary"):
+        # Botón de ejecución siempre disponible si los puntos están cargados
+        if st.button("🚀 Ejecutar Procesamiento, Recorte y Generar Informe", type="primary"):
+            if uploaded_poli is None:
+                st.warning("⚠️ Debes subir también el polígono perimetral en la sección 2 para poder realizar el recorte.")
+            else:
                 with st.spinner("Procesando malla IDW, aplicando filtro gaussiano y calculando estadísticas..."):
                     try:
                         poli_path = guardar_archivo_temporal(uploaded_poli)
@@ -162,7 +167,7 @@ if uploaded_puntos is not None:
                         fecha_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         
                         informe_texto = f"""==================================================
-        SYNTRO ACADEMY - INFORME TÉCNICO ESPACIAL
+        SYNTRÓ ACADEMY - INFORME TÉCNICO ESPACIAL
 ==================================================
 Fecha de Generación: {fecha_str}
 Especialista: Ing. Juan Segundo Suárez Rivera
@@ -212,8 +217,6 @@ Syntro Spatial Intelligence - Todos los derechos reservados.
                                 
                     except Exception as e:
                         st.error(f"Error procesando los datos espaciales: {str(e)}")
-        else:
-            st.info("⚠️ Por favor, carga también el archivo del polígono perimetral para realizar el recorte exacto.")
             
     except Exception as e:
         st.error(f"Error leyendo el archivo de puntos: {str(e)}")
